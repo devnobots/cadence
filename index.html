@@ -68,6 +68,10 @@
   .goalline b{color:var(--ink);font-weight:600;}
   .state{margin-top:1rem;font-weight:600;font-size:1.05rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
   .state.playing{color:var(--live);}
+  .state.armed{color:var(--live);}
+  @keyframes armedpulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .state.armed{animation:armedpulse 1.8s ease-in-out infinite;}
+  @media (prefers-reduced-motion:reduce){ .state.armed{animation:none;} }
 
   .ladder{display:flex;gap:.5rem;margin-top:1.2rem;}
   .rung{
@@ -178,6 +182,12 @@ const CONFIG = {
   STILL_VARIANCE: 0.08,
   ACCEL_WINDOW_MS: 1000,
   CADENCE_WINDOW_MS: 3000,
+
+  // ---- rate stability (the anti-bounce buffer) ----
+  SMOOTH_MS: 2500,        // rolling average window applied to speed/cadence
+  RATE_DWELL_MS: 2000,    // smoothed value must hold a new tier this long before rate changes
+  HYSTERESIS: 0.12,       // must cross this fraction PAST a boundary to step up,
+                          // and drop the same fraction BELOW to step down (0.12 = 12%)
 };
 
 const UNIT = { cycle:'MPH', jog:'STEPS / MIN' };
@@ -196,6 +206,13 @@ let gpsSpeedMph = 0, cadenceSpm = 0;
 let accelSamples = [];
 let stepTimes = [];
 let lastPeak = 0, dynMean = 9.81;
+
+// smoothing + hysteresis state
+let smoothBuf = [];              // {t, v} rolling samples of the driving metric
+let candidateTier = null;        // tier we're considering moving to
+let candidateSince = 0;          // when we started considering it
+let committedTier = CONFIG.RATES.length - 1; // the tier currently in effect
+let armed = false;               // true after Start; shown in UI
 
 function activePreset(){ return CONFIG.PRESETS[mode][pace]; }
 function goalValue(){ return activePreset().tiers[activePreset().tiers.length-1]; }
@@ -287,31 +304,38 @@ function syncPlayButton(){
   const b = document.getElementById('playBtn');
   let playing = false;
   try{ playing = player.getPlayerState() === YT.PlayerState.PLAYING; }catch(_){}
-  b.textContent = playing ? 'Pause' : 'Play';
   b.classList.toggle('paused', !playing);
   const s = document.getElementById('stateLabel');
   s.classList.toggle('playing', playing);
   if(playing){
     s.textContent = (desiredRateIdx === CONFIG.RATES.length-1) ? 'On pace — 1×' : 'Push harder';
+    s.classList.remove('armed');
+  }else if(armed){
+    s.textContent = mode==='cycle' ? 'Armed — start rolling' : 'Armed — start moving';
+    s.classList.add('armed');
   }else{
-    s.textContent = mode==='cycle' ? 'Paused — start rolling' : 'Paused — start moving';
+    s.textContent = 'Paused';
+    s.classList.remove('armed');
   }
+  // manual button is an override, label it by what a tap will do
+  b.textContent = playing ? 'Pause' : 'Play';
 }
 
 function tick(){
   const still = frameIsStill();
   const p = activePreset();
-  let moving, tierIdx;
+  let raw, moving;
 
   if(mode === 'cycle'){
+    raw = gpsSpeedMph;
     moving = gpsSpeedMph >= p.floor && !still;
-    tierIdx = tierFor(gpsSpeedMph, p.tiers);
   }else{
     cadenceSpm = currentCadence();
+    raw = cadenceSpm;
     moving = cadenceSpm >= p.floor;
-    tierIdx = tierFor(cadenceSpm, p.tiers);
   }
 
+  const sm = smoothed(raw);                 // buffered value drives the rate
   const now = performance.now();
   const manual = now < manualOverrideUntil;
 
@@ -327,16 +351,66 @@ function tick(){
     }
   }
 
+  const tierIdx = stableTier(sm, p.tiers);  // smoothed + hysteresis + dwell
   if(tierIdx >= 0 && tierIdx !== desiredRateIdx){
     desiredRateIdx = tierIdx;
     applyRate(false);
   }
 
-  // self-heal: if what we want and what the player is doing disagree, fix it
   reconcile();
-
   paintMetric();
   scheduleTick();
+}
+function smoothed(raw){
+  const now = performance.now();
+  smoothBuf.push({t:now, v:raw});
+  const cut = now - CONFIG.SMOOTH_MS;
+  while(smoothBuf.length && smoothBuf[0].t < cut) smoothBuf.shift();
+  if(!smoothBuf.length) return raw;
+  return smoothBuf.reduce((s,x)=>s+x.v,0)/smoothBuf.length;
+}
+
+/* Choose a tier from the smoothed value, but only COMMIT a change when the new
+   tier has been wanted continuously for RATE_DWELL_MS, and only when the value
+   has moved clearly past the boundary (hysteresis). This is what stops the
+   .25/.5/.75 flapping at a steady pace. */
+function stableTier(val, tiers){
+  const raw = rawTier(val, tiers);           // where we'd be with no smoothing rules
+  const now = performance.now();
+
+  // hysteresis: to move UP, require val >= nextBoundary*(1+H).
+  //             to move DOWN, require val < currentBoundary*(1-H).
+  let target = committedTier;
+  if(raw > committedTier){
+    const b = tiers[committedTier + 1];
+    if(b != null && val >= b * (1 + CONFIG.HYSTERESIS)) target = committedTier + 1;
+  }else if(raw < committedTier){
+    const b = tiers[committedTier];
+    if(b != null && val < b * (1 - CONFIG.HYSTERESIS)) target = committedTier - 1;
+  }
+  if(target < 0) target = 0;
+
+  // dwell: the target must persist before we accept it
+  if(target === committedTier){
+    candidateTier = null;
+    return committedTier;
+  }
+  if(candidateTier !== target){
+    candidateTier = target;
+    candidateSince = now;
+    return committedTier;
+  }
+  if(now - candidateSince >= CONFIG.RATE_DWELL_MS){
+    committedTier = target;
+    candidateTier = null;
+    return committedTier;
+  }
+  return committedTier;
+}
+function rawTier(val, tiers){
+  let idx = 0;
+  for(let i=0;i<tiers.length;i++){ if(val >= tiers[i]) idx = i; }
+  return idx;
 }
 function tierFor(val, tiers){
   let idx = -1;
@@ -467,6 +541,7 @@ document.getElementById('startBtn').onclick = async ()=>{
   // Prime playback WITHIN this user gesture so iOS/Safari allows later
   // script-driven play. We start, then pause a beat later; motion logic
   // takes over from there.
+  armed = true;
   primePlayback();
   scheduleTick();
 };
