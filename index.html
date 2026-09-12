@@ -9,15 +9,12 @@
 <meta name="theme-color" content="#000000" />
 <title>Cadence</title>
 <style>
-  /* ==========================================================================
-     CONFIG lives in the <script> block below (see TUNE ME). This is styling only.
-     ========================================================================== */
   :root{
-    --bg:#000;              /* true black = OLED pixels off = battery saved */
-    --ink:#e9e4d8;          /* warm off-white, dimmed so a bright screen isn't needed */
+    --bg:#000;
+    --ink:#e9e4d8;
     --ink-dim:#6f6a5f;
-    --live:#c6ff4a;         /* signal green: only the active rate uses it */
-    --pause:#c94b3b;        /* stop/pause state */
+    --live:#c6ff4a;
+    --pause:#c94b3b;
     --line:#232323;
     --font:'Barlow Semi Condensed', system-ui, sans-serif;
   }
@@ -32,10 +29,11 @@
     user-select:none;-webkit-user-select:none;
   }
 
-  /* ---- Start gate: needed for the one audio-unlock tap + sensor permissions ---- */
-  #gate{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2rem;padding:2rem;text-align:center;}
+  #gate{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.6rem;padding:2rem;text-align:center;overflow-y:auto;}
   #gate h1{font-weight:800;font-size:clamp(2.4rem,12vw,4.2rem);letter-spacing:-.02em;line-height:.92;}
   #gate h1 span{display:block;color:var(--ink-dim);font-weight:600;font-size:.34em;letter-spacing:.02em;margin-top:.6rem;}
+
+  .picklabel{color:var(--ink-dim);font-size:.8rem;letter-spacing:.08em;margin-bottom:-.6rem;}
   .modepick{display:flex;gap:.75rem;}
   .modepick button{
     background:transparent;border:1px solid var(--line);color:var(--ink);
@@ -43,37 +41,46 @@
     padding:.9rem 1.8rem;border-radius:2px;cursor:pointer;
   }
   .modepick button[aria-pressed="true"]{border-color:var(--live);color:var(--live);}
+
+  /* pace presets */
+  .pacepick{display:flex;gap:.6rem;}
+  .pacepick button{
+    background:transparent;border:1px solid var(--line);color:var(--ink);
+    font-family:var(--font);font-weight:600;font-size:1rem;
+    padding:.75rem 1.3rem;border-radius:2px;cursor:pointer;display:flex;flex-direction:column;gap:.15rem;align-items:center;
+  }
+  .pacepick button .sub{color:var(--ink-dim);font-weight:400;font-size:.72rem;}
+  .pacepick button[aria-pressed="true"]{border-color:var(--live);color:var(--live);}
+  .pacepick button[aria-pressed="true"] .sub{color:var(--live);opacity:.7;}
+
   #startBtn{
     background:var(--live);color:#000;border:none;font-family:var(--font);font-weight:800;
-    font-size:1.5rem;letter-spacing:.01em;padding:1.1rem 3.5rem;border-radius:2px;cursor:pointer;
+    font-size:1.5rem;letter-spacing:.01em;padding:1.1rem 3.5rem;border-radius:2px;cursor:pointer;margin-top:.4rem;
   }
-  #startBtn:disabled{opacity:.3;}
   .gatehint{color:var(--ink-dim);font-size:.9rem;max-width:22rem;line-height:1.4;}
 
-  /* ---- Main ride screen ---- */
   #app{flex:1;display:flex;flex-direction:column;visibility:hidden;}
 
   .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;}
   .metric{font-weight:800;font-size:clamp(5rem,34vw,12rem);line-height:.8;letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
   .unit{color:var(--ink-dim);font-weight:600;font-size:clamp(1rem,4vw,1.4rem);letter-spacing:.06em;}
-  .state{margin-top:1.4rem;font-weight:600;font-size:1.05rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
+  .goalline{margin-top:.9rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
+  .goalline b{color:var(--ink);font-weight:600;}
+  .state{margin-top:1rem;font-weight:600;font-size:1.05rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
   .state.playing{color:var(--live);}
 
-  /* rate ladder */
-  .ladder{display:flex;gap:.5rem;margin-top:1.6rem;}
+  .ladder{display:flex;gap:.5rem;margin-top:1.2rem;}
   .rung{
     min-width:3.2rem;text-align:center;padding:.45rem 0;border:1px solid var(--line);border-radius:2px;
     color:var(--ink-dim);font-weight:600;font-size:1rem;font-variant-numeric:tabular-nums;
   }
   .rung.on{border-color:var(--live);color:var(--live);}
   .rung.pausedon{border-color:var(--pause);color:var(--pause);}
+  .rung.goal{box-shadow:inset 0 -3px 0 var(--ink-dim);}
 
-  /* bottom bar: video + controls */
   .dock{display:flex;align-items:center;gap:1rem;padding:1rem;border-top:1px solid var(--line);}
-  /* YouTube requires the player rendered & >=200px; we keep it visible but small.
-     On narrow phones we let it shrink to fill available width down to a floor. */
   #player{width:120px;height:120px;flex:none;background:#111;border-radius:2px;overflow:hidden;}
-  #player iframe{width:100%;height:100%;border:0;pointer-events:none;} /* our controls only */
+  #player iframe{width:100%;height:100%;border:0;pointer-events:none;}
   .controls{flex:1;display:flex;flex-direction:column;gap:.7rem;}
   .nowplaying{color:var(--ink-dim);font-size:.85rem;line-height:1.25;max-height:2.5em;overflow:hidden;}
   .transport{display:flex;gap:.6rem;}
@@ -89,32 +96,41 @@
     border:1px solid var(--line);border-radius:2px;color:var(--ink-dim);
     font-weight:600;font-size:.8rem;letter-spacing:.06em;padding:.35rem .7rem;background:var(--bg);
   }
-  .diag{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);left:.9rem;color:var(--ink-dim);font-size:.72rem;line-height:1.35;font-variant-numeric:tabular-nums;}
+  .diag{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);left:.9rem;color:var(--ink-dim);font-size:.72rem;line-height:1.35;font-variant-numeric:tabular-nums;white-space:pre;}
 
   @media (max-width:380px){ #player{width:100px;height:100px;} }
 </style>
 </head>
 <body>
 
-<!-- ======================= START GATE ======================= -->
 <div id="gate">
   <h1>Cadence<span>music that keeps your pace</span></h1>
+
+  <div class="picklabel">ACTIVITY</div>
   <div class="modepick" role="group" aria-label="Activity">
     <button id="modeCycle" aria-pressed="true">Cycle</button>
     <button id="modeJog" aria-pressed="false">Jog</button>
   </div>
+
+  <div class="picklabel">HOW HARD DO YOU WANT TO WORK FOR 1×?</div>
+  <div class="pacepick" role="group" aria-label="Pace goal">
+    <button id="paceCrawl" aria-pressed="false">Crawl<span class="sub">easy 1×</span></button>
+    <button id="paceCruise" aria-pressed="true">Cruise<span class="sub">default</span></button>
+    <button id="paceSuffer" aria-pressed="false">Suffer<span class="sub">earn it</span></button>
+  </div>
+
   <button id="startBtn">Start</button>
-  <p class="gatehint">Keep the screen on and the phone mounted or in a pocket. Grant location and motion when asked — the music speeds up as you do, and pauses when you stop.</p>
+  <p class="gatehint">Keep the screen on and the phone mounted or in a pocket. Grant location and motion when asked — the music speeds up as you do, hits 1× when you reach your goal, and pauses when you stop.</p>
 </div>
 
-<!-- ======================= RIDE SCREEN ======================= -->
 <div id="app">
-  <div class="modechip" id="modeChip">CYCLE</div>
+  <div class="modechip" id="modeChip">CYCLE · CRUISE</div>
   <div class="diag" id="diag"></div>
 
   <div class="readout">
     <div class="metric" id="metric">0</div>
     <div class="unit" id="unit">MPH</div>
+    <div class="goalline" id="goalLine"></div>
     <div class="state" id="stateLabel">Paused — start moving</div>
     <div class="ladder" id="ladder"></div>
   </div>
@@ -124,9 +140,9 @@
     <div class="controls">
       <div class="nowplaying" id="nowPlaying">Loading playlist…</div>
       <div class="transport">
-        <button id="prevBtn" aria-label="Previous track">‹‹</button>
+        <button id="prevBtn" aria-label="Previous track">&#8249;&#8249;</button>
         <button id="playBtn">Pause</button>
-        <button id="nextBtn" aria-label="Next track">››</button>
+        <button id="nextBtn" aria-label="Next track">&#8250;&#8250;</button>
       </div>
     </div>
   </div>
@@ -134,57 +150,55 @@
 
 <script>
 /* ============================================================================
-   TUNE ME — every threshold you might want to change lives here.
+   TUNE ME
    ============================================================================ */
 const CONFIG = {
-  // Your hardcoded playlist. Swap this string to change playlists.
   PLAYLIST_ID: 'PLYq_mcte9NvDA2Xi5Qjl1DrH5LuDKDlAI',
 
-  // Playback rates the app will use, slowest→fastest. Must be values YouTube
-  // offers (0.25 / 0.5 / 0.75 / 1 are standard). Index 0 is used when moving
-  // slowest; last is "at pace".
   RATES: [0.25, 0.5, 0.75, 1],
 
-  // CYCLE mode: GPS speed (MPH) → which rate. Each number is the LOWER bound
-  // for that rate tier. Below MOVE_FLOOR (and still) = paused.
-  CYCLE: {
-    MOVE_FLOOR_MPH: 1.0,   // below this (and frame still) => pause
-    TIERS_MPH:     [1, 6, 9, 12], // >=1→0.25, >=6→0.5, >=9→0.75, >=12→1.0
+  // Pace presets. Each defines the FULL tier ladder (lower bounds for
+  // 0.25 / 0.5 / 0.75 / 1). Higher goal = you must go faster to reach 1x.
+  // MOVE_FLOOR = below this (and still) => pause.
+  PRESETS: {
+    cycle: {
+      crawl:  { floor:1.0, tiers:[1, 3, 4.5, 6]   },  // 1x at ~6 mph
+      cruise: { floor:1.0, tiers:[1, 6, 9, 12]     },  // 1x at ~12 mph (default)
+      suffer: { floor:1.0, tiers:[1, 9, 13.5, 18]  },  // 1x at ~18 mph
+    },
+    jog: {
+      crawl:  { floor:20, tiers:[20, 70, 100, 120]  },  // 1x at ~120 spm
+      cruise: { floor:20, tiers:[20, 110, 140, 160] },  // 1x at ~160 spm (default)
+      suffer: { floor:20, tiers:[20, 130, 165, 185] },  // 1x at ~185 spm
+    },
   },
 
-  // JOG mode: cadence (steps/min) → which rate.
-  JOG: {
-    MOVE_FLOOR_SPM: 20,    // below this => pause
-    TIERS_SPM:     [20, 110, 140, 160], // >=20→0.25 … >=160→1.0
-  },
-
-  // Debounce: quick to resume, slow to pause, so a glide or quiet stride
-  // doesn't chop the music.
-  RESUME_MS: 1200,   // must look "moving" this long before play
-  PAUSE_MS:  2800,   // must look "stopped" this long before pause
-
-  // Accelerometer stop-confirmer (both modes). Variance of accel magnitude
-  // below this = "frame is still". Kills phantom-GPS play at red lights.
-  STILL_VARIANCE: 0.08,   // m/s^2 ^2, tune after first ride
+  RESUME_MS: 1200,
+  PAUSE_MS:  2800,
+  STILL_VARIANCE: 0.08,
   ACCEL_WINDOW_MS: 1000,
-
-  // Jog cadence detection window.
   CADENCE_WINDOW_MS: 3000,
 };
+
+const UNIT = { cycle:'MPH', jog:'STEPS / MIN' };
 
 /* ============================================================================
    State
    ============================================================================ */
-let mode = 'cycle';                 // 'cycle' | 'jog'
+let mode = 'cycle';
+let pace = 'cruise';
 let player = null, playerReady = false;
-let wantPlaying = false;            // what the motion logic wants
+let wantPlaying = false;
 let desiredRateIdx = CONFIG.RATES.length - 1;
-let watchId = null;
-let accelSamples = [];              // {t, mag}
-let stepTimes = [];                 // timestamps of detected steps (jog)
-let lastPeak = 0;
+let manualOverrideUntil = 0;
 let moveSince = null, stopSince = null;
 let gpsSpeedMph = 0, cadenceSpm = 0;
+let accelSamples = [];
+let stepTimes = [];
+let lastPeak = 0, dynMean = 9.81;
+
+function activePreset(){ return CONFIG.PRESETS[mode][pace]; }
+function goalValue(){ return activePreset().tiers[activePreset().tiers.length-1]; }
 
 /* ============================================================================
    YouTube IFrame API
@@ -204,39 +218,24 @@ window.onYouTubeIframeAPIReady = function(){
     events:{ onReady:onPlayerReady, onStateChange:onPlayerStateChange, onError:onPlayerError },
   });
 };
-function onPlayerReady(){
-  playerReady = true;
-  applyRate(true);            // set initial rate
-  updateNowPlaying();
-}
+function onPlayerReady(){ playerReady = true; applyRate(true); updateNowPlaying(); }
 function onPlayerStateChange(e){
-  // Re-apply our rate whenever a new video starts — YouTube resets rate to 1.0
-  // on every track change, which would silently break tempo control.
   if(e.data === YT.PlayerState.PLAYING){ applyRate(true); updateNowPlaying(); }
-  // Keep our play/pause button in sync with reality.
   syncPlayButton();
 }
-function onPlayerError(){
-  // Embed-blocked / unavailable track: skip to the next one so a bad song
-  // doesn't stall the ride.
-  try{ player.nextVideo(); }catch(_){}
-}
+function onPlayerError(){ try{ player.nextVideo(); }catch(_){} }
 function updateNowPlaying(){
-  try{
-    const d = player.getVideoData();
-    document.getElementById('nowPlaying').textContent = d && d.title ? d.title : '—';
-  }catch(_){}
+  try{ const d = player.getVideoData(); document.getElementById('nowPlaying').textContent = d && d.title ? d.title : '—'; }catch(_){}
 }
 
 /* ============================================================================
-   Rate application
+   Rate
    ============================================================================ */
 function applyRate(force){
   if(!playerReady) return;
   const target = CONFIG.RATES[desiredRateIdx];
   try{
     const avail = player.getAvailablePlaybackRates() || [1];
-    // pick the closest available rate to our target
     let best = avail.reduce((a,b)=> Math.abs(b-target) < Math.abs(a-target) ? b : a, avail[0]);
     if(force || player.getPlaybackRate() !== best){ player.setPlaybackRate(best); }
   }catch(_){}
@@ -244,7 +243,7 @@ function applyRate(force){
 }
 
 /* ============================================================================
-   Play / pause driven by motion
+   Play/pause
    ============================================================================ */
 function setWantPlaying(v){
   if(v === wantPlaying) return;
@@ -261,62 +260,66 @@ function syncPlayButton(){
   b.classList.toggle('paused', !playing);
   const s = document.getElementById('stateLabel');
   s.classList.toggle('playing', playing);
-  if(playing){ s.textContent = 'Rolling'; }
-  else{ s.textContent = mode==='cycle' ? 'Paused — start rolling' : 'Paused — start moving'; }
+  if(playing){
+    s.textContent = (desiredRateIdx === CONFIG.RATES.length-1) ? 'On pace — 1×' : 'Push harder';
+  }else{
+    s.textContent = mode==='cycle' ? 'Paused — start rolling' : 'Paused — start moving';
+  }
 }
 
-/* Core decision, runs a few times a second. */
 function tick(){
   const still = frameIsStill();
+  const p = activePreset();
   let moving, tierIdx;
 
   if(mode === 'cycle'){
-    moving = gpsSpeedMph >= CONFIG.CYCLE.MOVE_FLOOR_MPH && !still;
-    tierIdx = tierFor(gpsSpeedMph, CONFIG.CYCLE.TIERS_MPH);
+    moving = gpsSpeedMph >= p.floor && !still;
+    tierIdx = tierFor(gpsSpeedMph, p.tiers);
   }else{
     cadenceSpm = currentCadence();
-    moving = cadenceSpm >= CONFIG.JOG.MOVE_FLOOR_SPM;
-    tierIdx = tierFor(cadenceSpm, CONFIG.JOG.TIERS_SPM);
+    moving = cadenceSpm >= p.floor;
+    tierIdx = tierFor(cadenceSpm, p.tiers);
   }
 
-  // debounce play/pause
   const now = performance.now();
-  if(moving){
-    stopSince = null;
-    if(moveSince === null) moveSince = now;
-    if(now - moveSince >= CONFIG.RESUME_MS) setWantPlaying(true);
-  }else{
-    moveSince = null;
-    if(stopSince === null) stopSince = now;
-    if(now - stopSince >= CONFIG.PAUSE_MS) setWantPlaying(false);
+  const manual = now < manualOverrideUntil;
+
+  if(!manual){
+    if(moving){
+      stopSince = null;
+      if(moveSince === null) moveSince = now;
+      if(now - moveSince >= CONFIG.RESUME_MS) setWantPlaying(true);
+    }else{
+      moveSince = null;
+      if(stopSince === null) stopSince = now;
+      if(now - stopSince >= CONFIG.PAUSE_MS) setWantPlaying(false);
+    }
   }
 
-  // rate follows tier whenever we're (or want to be) moving
   if(tierIdx >= 0 && tierIdx !== desiredRateIdx){
     desiredRateIdx = tierIdx;
     applyRate(false);
   }
 
   paintMetric();
-  requestAnimationFrame(throttle(tick));
+  scheduleTick();
 }
 function tierFor(val, tiers){
   let idx = -1;
   for(let i=0;i<tiers.length;i++){ if(val >= tiers[i]) idx = i; }
-  return idx; // -1 means below floor
+  return idx;
 }
-
-/* simple ~10fps throttle so we're not spamming */
 let lastRun = 0;
-function throttle(fn){ return (t)=>{ if(t-lastRun>100){ lastRun=t; fn(); } else { requestAnimationFrame(throttle(fn)); } }; }
+function scheduleTick(){
+  requestAnimationFrame((t)=>{ if(t-lastRun>100){ lastRun=t; tick(); } else { scheduleTick(); } });
+}
 
 /* ============================================================================
    Sensors
    ============================================================================ */
 function startGPS(){
   if(!('geolocation' in navigator)) return;
-  watchId = navigator.geolocation.watchPosition(pos=>{
-    // coords.speed is m/s or null. Convert to mph; treat null as 0.
+  navigator.geolocation.watchPosition(pos=>{
     const ms = (pos.coords.speed == null || isNaN(pos.coords.speed)) ? 0 : pos.coords.speed;
     gpsSpeedMph = Math.max(0, ms * 2.23694);
   }, ()=>{}, { enableHighAccuracy:true, maximumAge:1000, timeout:8000 });
@@ -327,44 +330,31 @@ function onMotion(e){
   const mag = Math.sqrt((a.x||0)**2 + (a.y||0)**2 + (a.z||0)**2);
   const now = performance.now();
   accelSamples.push({t:now, mag});
-  // trim window
   const cut = now - Math.max(CONFIG.ACCEL_WINDOW_MS, CONFIG.CADENCE_WINDOW_MS);
   while(accelSamples.length && accelSamples[0].t < cut) accelSamples.shift();
-
-  // ---- jog step detection: peak-picking on magnitude ----
-  if(mode === 'jog'){
-    detectStep(now, mag);
-  }
+  if(mode === 'jog') detectStep(now, mag);
 }
 function frameIsStill(){
   const cut = performance.now() - CONFIG.ACCEL_WINDOW_MS;
   const win = accelSamples.filter(s=>s.t>=cut);
-  if(win.length < 4) return false; // no data yet → don't force-pause
+  if(win.length < 4) return false;
   const mean = win.reduce((s,x)=>s+x.mag,0)/win.length;
   const varc = win.reduce((s,x)=>s+(x.mag-mean)**2,0)/win.length;
   return varc < CONFIG.STILL_VARIANCE;
 }
-/* crude but effective step counter: detect upward magnitude crossings with a
-   refractory period. Good enough for play/pause + coarse cadence tiers. */
-let dynMean = 9.81;
 function detectStep(now, mag){
-  dynMean = dynMean*0.95 + mag*0.05;           // running baseline
-  const threshold = dynMean + 1.4;             // step impact rises above baseline
-  if(mag > threshold && (now - lastPeak) > 250){ // 250ms refractory ≈ max 240spm
-    lastPeak = now;
-    stepTimes.push(now);
-  }
+  dynMean = dynMean*0.95 + mag*0.05;
+  const threshold = dynMean + 1.4;
+  if(mag > threshold && (now - lastPeak) > 250){ lastPeak = now; stepTimes.push(now); }
   const cut = now - CONFIG.CADENCE_WINDOW_MS;
   while(stepTimes.length && stepTimes[0] < cut) stepTimes.shift();
 }
 function currentCadence(){
   if(stepTimes.length < 2) return 0;
-  const span = (stepTimes[stepTimes.length-1] - stepTimes[0]) / 1000; // s
+  const span = (stepTimes[stepTimes.length-1] - stepTimes[0]) / 1000;
   if(span <= 0) return 0;
-  const stepsPerSec = (stepTimes.length - 1) / span;
-  // if last step was a while ago, we've stopped
   if(performance.now() - stepTimes[stepTimes.length-1] > 1500) return 0;
-  return stepsPerSec * 60;
+  return ((stepTimes.length - 1) / span) * 60;
 }
 
 /* ============================================================================
@@ -375,31 +365,36 @@ function paintMetric(){
   const u = document.getElementById('unit');
   if(mode==='cycle'){ m.textContent = gpsSpeedMph.toFixed(1); u.textContent='MPH'; }
   else{ m.textContent = Math.round(cadenceSpm); u.textContent='STEPS / MIN'; }
+
+  const gl = document.getElementById('goalLine');
+  const g = goalValue();
+  gl.innerHTML = mode==='cycle'
+    ? `1× at <b>${g} mph</b>`
+    : `1× at <b>${g} spm</b>`;
+
   document.getElementById('diag').textContent =
-    `mode ${mode}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${CONFIG.RATES[desiredRateIdx]}\nstill ${frameIsStill()}`;
+    `mode ${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${CONFIG.RATES[desiredRateIdx]}\ngoal ${g}\nstill ${frameIsStill()}`;
 }
 function paintLadder(){
   const l = document.getElementById('ladder');
   if(l.children.length !== CONFIG.RATES.length){
-    l.innerHTML = CONFIG.RATES.map(r=>`<div class="rung">${r}×</div>`).join('');
+    l.innerHTML = CONFIG.RATES.map(r=>`<div class="rung">${r}&#215;</div>`).join('');
   }
   let playing=false; try{ playing = player.getPlayerState()===YT.PlayerState.PLAYING; }catch(_){}
+  const goalIdx = CONFIG.RATES.length-1;
   [...l.children].forEach((el,i)=>{
     el.classList.toggle('on', i===desiredRateIdx && playing);
     el.classList.toggle('pausedon', i===desiredRateIdx && !playing);
+    el.classList.toggle('goal', i===goalIdx);
   });
 }
 
 /* ============================================================================
-   Wake Lock — keep the screen (and audio) alive through the ride
+   Wake Lock
    ============================================================================ */
 let wakeLock=null;
-async function keepAwake(){
-  try{ if('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); } }catch(_){}
-}
-document.addEventListener('visibilitychange', async ()=>{
-  if(wakeLock!==null && document.visibilityState==='visible'){ keepAwake(); }
-});
+async function keepAwake(){ try{ if('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); } }catch(_){} }
+document.addEventListener('visibilitychange', ()=>{ if(wakeLock!==null && document.visibilityState==='visible'){ keepAwake(); } });
 
 /* ============================================================================
    Wiring
@@ -409,11 +404,19 @@ function setMode(m){
   document.getElementById('modeCycle').setAttribute('aria-pressed', m==='cycle');
   document.getElementById('modeJog').setAttribute('aria-pressed', m==='jog');
 }
+function setPace(p){
+  pace = p;
+  document.getElementById('paceCrawl').setAttribute('aria-pressed', p==='crawl');
+  document.getElementById('paceCruise').setAttribute('aria-pressed', p==='cruise');
+  document.getElementById('paceSuffer').setAttribute('aria-pressed', p==='suffer');
+}
 document.getElementById('modeCycle').onclick = ()=>setMode('cycle');
 document.getElementById('modeJog').onclick   = ()=>setMode('jog');
+document.getElementById('paceCrawl').onclick  = ()=>setPace('crawl');
+document.getElementById('paceCruise').onclick = ()=>setPace('cruise');
+document.getElementById('paceSuffer').onclick = ()=>setPace('suffer');
 
 document.getElementById('startBtn').onclick = async ()=>{
-  // iOS requires requesting motion permission from a user gesture.
   try{
     if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
       await DeviceMotionEvent.requestPermission();
@@ -423,17 +426,15 @@ document.getElementById('startBtn').onclick = async ()=>{
   startGPS();
   keepAwake();
 
-  document.getElementById('modeChip').textContent = mode.toUpperCase();
+  document.getElementById('modeChip').textContent = `${mode.toUpperCase()} · ${pace.toUpperCase()}`;
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.visibility='visible';
-
-  requestAnimationFrame(throttle(tick));
+  scheduleTick();
 };
 
-// manual transport — your buttons, YouTube's methods
 document.getElementById('playBtn').onclick = ()=>{
   let playing=false; try{ playing = player.getPlayerState()===YT.PlayerState.PLAYING; }catch(_){}
-  // manual override of the motion logic for this moment
+  manualOverrideUntil = performance.now() + 4000; // 4s grace so motion logic doesn't instantly fight you
   setWantPlaying(!playing);
 };
 document.getElementById('nextBtn').onclick = ()=>{ try{ player.nextVideo(); }catch(_){} };
