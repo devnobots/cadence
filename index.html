@@ -20,7 +20,7 @@
   }
   @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;800&display=swap');
 
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
   html,body{height:100%;}
   body{
     background:var(--bg);color:var(--ink);font-family:var(--font);
@@ -84,7 +84,7 @@
   .controls{flex:1;display:flex;flex-direction:column;gap:.7rem;}
   .nowplaying{color:var(--ink-dim);font-size:.85rem;line-height:1.25;max-height:2.5em;overflow:hidden;}
   .transport{display:flex;gap:.6rem;}
-  .transport button{
+  .transport button{touch-action:manipulation;
     flex:1;background:transparent;border:1px solid var(--line);color:var(--ink);
     font-family:var(--font);font-weight:800;font-size:1.35rem;padding:.75rem 0;border-radius:2px;cursor:pointer;
   }
@@ -236,8 +236,10 @@ function applyRate(force){
   const target = CONFIG.RATES[desiredRateIdx];
   try{
     const avail = player.getAvailablePlaybackRates() || [1];
-    let best = avail.reduce((a,b)=> Math.abs(b-target) < Math.abs(a-target) ? b : a, avail[0]);
-    if(force || player.getPlaybackRate() !== best){ player.setPlaybackRate(best); }
+    if(avail && avail.length){
+      let best = avail.reduce((a,b)=> Math.abs(b-target) < Math.abs(a-target) ? b : a, avail[0]);
+      if(force || player.getPlaybackRate() !== best){ player.setPlaybackRate(best); }
+    }
   }catch(_){}
   paintLadder();
 }
@@ -246,11 +248,40 @@ function applyRate(force){
    Play/pause
    ============================================================================ */
 function setWantPlaying(v){
-  if(v === wantPlaying) return;
   wantPlaying = v;
+  reconcile();
+}
+/* Always drive the player toward what we want, based on its ACTUAL state.
+   This is the fix for the "tap play many times before it works" race: we no
+   longer trust a stale flag, we compare against the real player state each time. */
+function reconcile(){
   if(!playerReady) return;
-  try{ v ? player.playVideo() : player.pauseVideo(); }catch(_){}
+  let st;
+  try{ st = player.getPlayerState(); }catch(_){ return; }
+  const P = YT.PlayerState;
+  if(wantPlaying){
+    // start only if not already playing/buffering
+    if(st !== P.PLAYING && st !== P.BUFFERING){
+      try{ player.playVideo(); }catch(_){}
+    }
+  }else{
+    if(st === P.PLAYING || st === P.BUFFERING){
+      try{ player.pauseVideo(); }catch(_){}
+    }
+  }
   syncPlayButton();
+}
+function primePlayback(){
+  if(!playerReady){
+    // player not ready yet; try again shortly (still counts toward the session)
+    setTimeout(primePlayback, 250);
+    return;
+  }
+  try{
+    player.playVideo();
+    // brief play then pause to satisfy the gesture requirement without blasting audio
+    setTimeout(()=>{ try{ if(!wantPlaying) player.pauseVideo(); }catch(_){} }, 400);
+  }catch(_){}
 }
 function syncPlayButton(){
   const b = document.getElementById('playBtn');
@@ -300,6 +331,9 @@ function tick(){
     desiredRateIdx = tierIdx;
     applyRate(false);
   }
+
+  // self-heal: if what we want and what the player is doing disagree, fix it
+  reconcile();
 
   paintMetric();
   scheduleTick();
@@ -429,13 +463,19 @@ document.getElementById('startBtn').onclick = async ()=>{
   document.getElementById('modeChip').textContent = `${mode.toUpperCase()} · ${pace.toUpperCase()}`;
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.visibility='visible';
+
+  // Prime playback WITHIN this user gesture so iOS/Safari allows later
+  // script-driven play. We start, then pause a beat later; motion logic
+  // takes over from there.
+  primePlayback();
   scheduleTick();
 };
 
 document.getElementById('playBtn').onclick = ()=>{
   let playing=false; try{ playing = player.getPlayerState()===YT.PlayerState.PLAYING; }catch(_){}
   manualOverrideUntil = performance.now() + 4000; // 4s grace so motion logic doesn't instantly fight you
-  setWantPlaying(!playing);
+  wantPlaying = !playing;
+  reconcile();
 };
 document.getElementById('nextBtn').onclick = ()=>{ try{ player.nextVideo(); }catch(_){} };
 document.getElementById('prevBtn').onclick = ()=>{ try{ player.previousVideo(); }catch(_){} };
