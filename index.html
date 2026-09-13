@@ -9,13 +9,13 @@
 <meta name="theme-color" content="#000000" />
 <title>Cadence</title>
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;800&display=swap');
   :root{
     --bg:#000; --ink:#e9e4d8; --ink-dim:#6f6a5f;
     --live:#c6ff4a; --pause:#c94b3b; --line:#232323;
     --font:'Barlow Semi Condensed', system-ui, sans-serif;
   }
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;800&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
+    *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
   html,body{height:100%;}
   body{
     background:var(--bg);color:var(--ink);font-family:var(--font);
@@ -190,7 +190,7 @@ const CONFIG = {
 /* ============================================================================
    State
    ============================================================================ */
-let mode='cycle', pace='cruise', armed=false;
+let mode='cycle', pace='cruise', armed=false, running=false;
 let playlist=[], trackIdx=0;
 let wantSound=false, curRate=0, liveRate=0, pausedAt=0;
 let gpsSpeedMph=0, cadenceSpm=0;
@@ -244,9 +244,11 @@ let actx=null, masterGain=null;
 let bufCache=[];              // decoded AudioBuffers by index (current+next only)
 let srcNode=null;            // current AudioBufferSourceNode
 let playing=false;           // is a source node currently started & not stopped
-let startCtxTime=0;          // actx.currentTime when current track (re)started
-let startOffset=0;           // buffer offset (s) at last (re)start
+let playCursor=0;            // accumulated playback position (s) into current buffer
+let lastAdvanceT=0;          // actx.currentTime at last cursor advance
 let curBufIdx=-1;
+let isLoading=false;   // guard: a decode/load is in flight
+let pendingAutoplay=false;
 
 function initAudioCtx(){
   if(actx) return;
@@ -259,9 +261,12 @@ function initAudioCtx(){
 }
 
 // fetch + decode a track into an AudioBuffer (memory-heavy, so only near tracks)
+const decoding={};
 async function decodeTrack(i){
   i=(i+playlist.length)%playlist.length;
   if(bufCache[i]) return bufCache[i];
+  if(decoding[i]) return decoding[i];   // a decode for this index is already running
+  decoding[i]=(async()=>{
   try{
     LOG('decode start #'+(i+1));
     const res=await fetch(playlist[i]); if(!res.ok) throw new Error('fetch '+res.status);
@@ -277,6 +282,9 @@ async function decodeTrack(i){
     }
     return buf;
   }catch(err){ LOG('decode FAIL #'+(i+1)+': '+err.message); return null; }
+  finally{ delete decoding[i]; }
+  })();
+  return decoding[i];
 }
 
 function stopSource(){
@@ -294,30 +302,45 @@ function startSource(buf, offset){
   srcNode.connect(masterGain);
   srcNode.onended=()=>{ if(playing){ /* natural end */ LOG('track ended -> next'); playing=false; loadTrack(trackIdx+1,true); } };
   offset=Math.max(0, Math.min(offset||0, buf.duration-0.05));
-  startOffset=offset; startCtxTime=actx.currentTime;
+  playCursor=offset; lastAdvanceT=actx.currentTime;
   srcNode.start(0, offset);
   playing=true;
 }
 
 async function loadTrack(i, autoplay){
   if(!playlist.length) return;
+  const wantIdx=(i+playlist.length)%playlist.length;
+  // If we're already on this track with a decoded buffer, just (re)start it.
+  if(wantIdx===curBufIdx && bufCache[curBufIdx]){
+    if(autoplay||wantSound) startSource(bufCache[curBufIdx], currentOffset());
+    return;
+  }
+  // Hard guard: never run two loads at once (this was the infinite-decode bug).
+  if(isLoading){ pendingAutoplay = pendingAutoplay||autoplay; return; }
+  isLoading=true;
   initAudioCtx();
-  trackIdx=(i+playlist.length)%playlist.length;
+  trackIdx=wantIdx;
   LOG('loadTrack #'+(trackIdx+1)+' autoplay='+autoplay);
   const buf=await decodeTrack(trackIdx);
-  if(!buf) return;
+  isLoading=false;
+  if(!buf){ return; }
   curBufIdx=trackIdx;
-  if(autoplay || wantSound){ startSource(buf, 0); }
-  else { stopSource(); startOffset=0; }
-  decodeTrack(trackIdx+1); // prefetch next
+  if(autoplay||pendingAutoplay||wantSound){ startSource(buf, 0); }
+  else { stopSource(); playCursor=0; }
+  pendingAutoplay=false;
+  decodeTrack(trackIdx+1); // prefetch next (decodeTrack has its own cache guard)
 }
 
-// how far into the current buffer we are right now (for pause/resume)
-function currentOffset(){
-  if(!srcNode) return startOffset;
-  const played=(actx.currentTime-startCtxTime)*srcNode.playbackRate.value;
-  return startOffset+played;
+// Advance the playback cursor incrementally using the CURRENT rate over the
+// small dt since the last advance. Accumulating avoids the (elapsed*rate) bug
+// where a later rate change would distort the whole elapsed span.
+function advanceCursor(){
+  if(!playing||!srcNode||!actx) return;
+  const t=actx.currentTime;
+  const dt=t-lastAdvanceT; lastAdvanceT=t;
+  playCursor += dt * srcNode.playbackRate.value;
 }
+function currentOffset(){ advanceCursor(); return playCursor; }
 
 function setSound(on){
   wantSound=on;
@@ -327,15 +350,10 @@ function setSound(on){
     if(!playing){
       const buf=bufCache[curBufIdx>=0?curBufIdx:trackIdx];
       if(buf) startSource(buf, currentOffset());
-      else loadTrack(trackIdx, true);
+      else if(!isLoading) loadTrack(trackIdx, true);  // guard: only if not already loading
     }
   }else{
-    if(playing){
-      // remember offset then stop (Web Audio nodes are one-shot)
-      const off=currentOffset();
-      stopSource();
-      startOffset=off;
-    }
+    if(playing){ const off=currentOffset(); stopSource(); playCursor=off; }
   }
 }
 
@@ -347,7 +365,7 @@ function applyLiveRate(){
     try{ srcNode.playbackRate.setTargetAtTime(r, actx.currentTime, 0.05); }catch(_){ srcNode.playbackRate.value=r; }
   }
   // below MIN_RATE with no desire to play => stop (silence)
-  if(liveRate<CONFIG.MIN_RATE && !wantSound && playing){ const off=currentOffset(); stopSource(); startOffset=off; }
+  if(liveRate<CONFIG.MIN_RATE && !wantSound && playing){ const off=currentOffset(); stopSource(); playCursor=off; }
 }
 
 /* ============================================================================
@@ -355,6 +373,7 @@ function applyLiveRate(){
    ============================================================================ */
 let lastTickT=0;
 function tick(){
+  if(!running) return;
   const now=performance.now();
   const dt=lastTickT?(now-lastTickT)/1000:0.1; lastTickT=now;
 
@@ -382,18 +401,21 @@ function tick(){
   if(liveRate<curRate) liveRate=Math.min(curRate,liveRate+maxDelta);
   else if(liveRate>curRate) liveRate=Math.max(curRate,liveRate-maxDelta);
 
+  advanceCursor();
   applyLiveRate();
-  // watchdog: if motion wants sound but nothing is playing, (re)start.
-  if(wantSound && liveRate>=CONFIG.MIN_RATE && !playing){
-    if(pausedAt===0) pausedAt=now;
-    if(now-pausedAt>400){ setSound(true); pausedAt=0; }
+  // watchdog: if motion wants sound and we have a decoded buffer but aren't
+  // playing, start ONCE. Never touches loadTrack, never stampedes a decode.
+  if(wantSound && liveRate>=CONFIG.MIN_RATE && !playing && !isLoading){
+    const buf=bufCache[curBufIdx];
+    if(buf){ if(pausedAt===0) pausedAt=now; if(now-pausedAt>400){ startSource(buf, currentOffset()); pausedAt=0; } }
+    else { pausedAt=0; } // no buffer yet — wait for decode, don't reload
   } else { pausedAt=0; }
 
   paint();
   scheduleTick();
 }
 let lastRun=0;
-function scheduleTick(){ requestAnimationFrame(t=>{ if(t-lastRun>80){ lastRun=t; tick(); } else scheduleTick(); }); }
+function scheduleTick(){ if(!running) return; requestAnimationFrame(t=>{ if(!running) return; if(t-lastRun>80){ lastRun=t; tick(); } else scheduleTick(); }); }
 
 function smoothed(raw){
   const now=performance.now();
@@ -406,9 +428,10 @@ function smoothed(raw){
 /* ============================================================================
    Sensors
    ============================================================================ */
+let geoWatchId=null;
 function startGPS(){
   if(!('geolocation' in navigator)) return;
-  navigator.geolocation.watchPosition(p=>{
+  geoWatchId=navigator.geolocation.watchPosition(p=>{
     const ms=(p.coords.speed==null||isNaN(p.coords.speed))?0:p.coords.speed;
     gpsSpeedMph=Math.max(0,ms*2.23694);
   },()=>{},{enableHighAccuracy:true,maximumAge:1000,timeout:8000});
@@ -477,10 +500,14 @@ function stepRecently(){
   return stepTimes.length>0 && (performance.now()-stepTimes[stepTimes.length-1])<1200;
 }
 function currentCadence(){
+  const now=performance.now();
+  // trim stale timestamps by wall-clock so a long stop can't leave ancient data
+  const cut=now-CONFIG.CADENCE_WINDOW_MS;
+  while(stepTimes.length && stepTimes[0]<cut) stepTimes.shift();
   if(stepTimes.length<2) return 0;
   const span=(stepTimes[stepTimes.length-1]-stepTimes[0])/1000;
   if(span<=0) return 0;
-  if(performance.now()-stepTimes[stepTimes.length-1]>CONFIG.MAX_STEP_MS) return 0;
+  if(now-stepTimes[stepTimes.length-1]>CONFIG.MAX_STEP_MS) return 0;
   return ((stepTimes.length-1)/span)*60;
 }
 
@@ -540,7 +567,14 @@ function makeHold(el, ms, onComplete){
   }
   function start(ev){ ev.preventDefault(); active=true; t0=performance.now(); el.classList.add('armedhold'); raf=requestAnimationFrame(frame); }
   function cancel(){ active=false; cancelAnimationFrame(raf); if(fill) fill.style.width='0%'; el.classList.remove('armedhold'); }
+  function onMove(ev){
+    if(!active) return;
+    const t=ev.touches&&ev.touches[0]; if(!t) return;
+    const r=el.getBoundingClientRect();
+    if(t.clientX<r.left||t.clientX>r.right||t.clientY<r.top||t.clientY>r.bottom){ cancel(); }
+  }
   el.addEventListener('touchstart',start,{passive:false});
+  el.addEventListener('touchmove',onMove,{passive:true});
   el.addEventListener('touchend',cancel);
   el.addEventListener('touchcancel',cancel);
   el.addEventListener('mousedown',start);
@@ -579,6 +613,7 @@ document.getElementById('startBtn').onclick=async ()=>{
   document.getElementById('modeChip').textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.visibility='visible';
+  running=true;
   scheduleTick();
 };
 
@@ -586,9 +621,15 @@ document.getElementById('startBtn').onclick=async ()=>{
 makeHold(document.getElementById('nextBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx+1,wantSound));
 makeHold(document.getElementById('prevBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx-1,wantSound));
 makeHold(document.getElementById('endBtn'), CONFIG.HOLD_MS, ()=>{
-  armed=false; wantSound=false; stopSource();
+  armed=false; running=false; wantSound=false;
+  stopSource();
+  window.removeEventListener('devicemotion',onMotion);
+  if(geoWatchId!==null){ try{ navigator.geolocation.clearWatch(geoWatchId); }catch(_){} geoWatchId=null; }
+  if(wakeLock){ try{ wakeLock.release(); }catch(_){} wakeLock=null; }
+  if(actx && actx.state==='running'){ try{ actx.suspend(); }catch(_){} }
   document.getElementById('app').style.visibility='hidden';
   document.getElementById('gate').style.display='flex';
+  LOG('session ended, sensors released');
 });
 
 // log panel controls
