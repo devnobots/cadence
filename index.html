@@ -80,6 +80,12 @@
   #rotate{position:fixed;inset:0;background:var(--bg);z-index:99;display:none;flex-direction:column;align-items:center;justify-content:center;gap:1rem;text-align:center;padding:2rem;}
   #rotate .big{font-weight:800;font-size:2rem;}
   #rotate .sub{color:var(--ink-dim);}
+  #logPanel{position:fixed;left:0;right:0;bottom:0;max-height:45vh;background:#0a0a0a;border-top:1px solid var(--line);z-index:80;display:none;flex-direction:column;}
+  #logPanel.open{display:flex;}
+  #logHead{display:flex;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid var(--line);align-items:center;}
+  #logHead button{background:transparent;border:1px solid var(--line);color:var(--ink);font-family:var(--font);font-weight:600;font-size:.8rem;padding:.4rem .8rem;border-radius:2px;cursor:pointer;}
+  #logText{flex:1;overflow-y:auto;font-family:ui-monospace,monospace;font-size:.68rem;line-height:1.35;color:var(--ink-dim);padding:.5rem .7rem;white-space:pre-wrap;word-break:break-word;}
+  #logToggle{position:fixed;bottom:.6rem;left:.6rem;z-index:81;background:#0a0a0a;border:1px solid var(--line);color:var(--ink-dim);font-family:var(--font);font-weight:600;font-size:.72rem;padding:.35rem .6rem;border-radius:2px;cursor:pointer;}
   @media (orientation:landscape) and (max-height:500px){ #rotate{display:flex;} #gate,#app{display:none!important;} }
 </style>
 </head>
@@ -133,6 +139,16 @@
 
 <div id="rotate"><div class="big">Rotate to portrait</div><div class="sub">Cadence runs upright</div></div>
 
+<button id="logToggle">LOG</button>
+<div id="logPanel">
+  <div id="logHead">
+    <button id="logCopy">Copy</button>
+    <button id="logClear">Clear</button>
+    <button id="logClose">Close</button>
+  </div>
+  <div id="logText"></div>
+</div>
+
 <audio id="audio" preload="auto" crossorigin="anonymous"></audio>
 
 <script>
@@ -175,18 +191,28 @@ const CONFIG = {
    State
    ============================================================================ */
 let mode='cycle', pace='cruise', armed=false;
-let playlist=[], trackIdx=0;
+let playlist=[], trackIdx=0, blobCache=[];
 const audio=document.getElementById('audio');
-let wantSound=false, curRate=0, liveRate=0;
+let wantSound=false, curRate=0, liveRate=0, pausedAt=0;
 let gpsSpeedMph=0, cadenceSpm=0;
 let accelSamples=[], smoothBuf=[], moveSince=null, stopSince=null;
 let lastAudioErr='';
+let logLines=[];
+function LOG(msg){
+  const t=(performance.now()/1000).toFixed(2);
+  logLines.push(`[${t}] ${msg}`);
+  if(logLines.length>400) logLines.shift();
+  const el=document.getElementById('logText');
+  if(el){ el.textContent=logLines.join('\n'); el.scrollTop=el.scrollHeight; }
+}
 
 audio.preservesPitch=false; audio.mozPreservesPitch=false; audio.webkitPreservesPitch=false;
-audio.addEventListener('error',()=>{ const e=audio.error; lastAudioErr=e?('err '+e.code):'err'; });
-audio.addEventListener('playing',()=>{ lastAudioErr='playing'; });
-audio.addEventListener('stalled',()=>{ lastAudioErr='stalled'; });
-audio.addEventListener('waiting',()=>{ lastAudioErr='buffering'; });
+audio.addEventListener('error',()=>{ const e=audio.error; lastAudioErr=e?('err '+e.code):'err'; LOG('audio ERROR '+(e?e.code:'?')); });
+audio.addEventListener('playing',()=>{ lastAudioErr='playing'; LOG('event: playing rate='+audio.playbackRate.toFixed(2)); });
+audio.addEventListener('stalled',()=>{ lastAudioErr='stalled'; LOG('event: STALLED'); });
+audio.addEventListener('waiting',()=>{ lastAudioErr='buffering'; LOG('event: waiting/buffering'); });
+audio.addEventListener('pause',()=>{ LOG('event: pause'); });
+audio.addEventListener('ended',()=>{});
 
 const kind=()=>CONFIG.METRIC_KIND[mode];
 const goalPace=()=>CONFIG.PRESETS[mode][pace];
@@ -205,8 +231,12 @@ async function loadPlaylist(){
       .map(x=>x.name).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
     if(!names.length) throw new Error('no audio files');
     playlist=names.map(n=>`https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
-    status.textContent=`${playlist.length} songs ready`;
+    blobCache=new Array(playlist.length).fill(null);
+    status.textContent=`${playlist.length} songs found`;
     startBtn.textContent='Start'; startBtn.disabled=false;
+    LOG('playlist: '+playlist.length+' songs');
+    // begin prefetching first track fully into memory
+    prefetch(0);
   }catch(err){
     status.textContent='Could not load songs: '+err.message;
     startBtn.textContent='Start'; startBtn.disabled=false;
@@ -216,14 +246,37 @@ async function loadPlaylist(){
 /* ============================================================================
    Audio
    ============================================================================ */
-function loadTrack(i,autoplay){
+// Fetch a whole track into memory as a blob URL so playback never touches the
+// network mid-song (fixes low-rate stutter caused by streaming stalls).
+async function prefetch(i){
+  i=(i+playlist.length)%playlist.length;
+  if(blobCache[i]) return blobCache[i];
+  try{
+    LOG('prefetch start #'+(i+1));
+    const res=await fetch(playlist[i]);
+    if(!res.ok) throw new Error('fetch '+res.status);
+    const buf=await res.blob();
+    const url=URL.createObjectURL(buf);
+    blobCache[i]=url;
+    LOG('prefetch done #'+(i+1)+' ('+(buf.size/1048576).toFixed(1)+'MB)');
+    return url;
+  }catch(err){ LOG('prefetch FAIL #'+(i+1)+': '+err.message); return null; }
+}
+
+async function loadTrack(i,autoplay){
   if(!playlist.length) return;
   trackIdx=(i+playlist.length)%playlist.length;
-  audio.src=playlist[trackIdx]; audio.load();
-  if(autoplay) audio.play().catch(()=>{});
+  LOG('loadTrack #'+(trackIdx+1)+' autoplay='+autoplay);
+  // use in-memory blob if ready, else fall back to streaming URL while it loads
+  let src=blobCache[trackIdx];
+  if(!src){ src=playlist[trackIdx]; prefetch(trackIdx).then(u=>{ if(u && trackIdx===((i+playlist.length)%playlist.length) && audio.src!==u){ /* swap only if not yet playing far in */ } }); }
+  audio.src=src; audio.load();
+  if(autoplay) audio.play().catch(e=>LOG('play() rej: '+e.message));
   try{ audio.playbackRate=Math.max(CONFIG.MIN_RATE,liveRate); }catch(_){}
+  // prefetch next track in background for seamless advance
+  prefetch(trackIdx+1);
 }
-audio.addEventListener('ended',()=>loadTrack(trackIdx+1,wantSound));
+audio.addEventListener('ended',()=>{ LOG('track ended -> next'); loadTrack(trackIdx+1,wantSound); });
 
 function setSound(on){
   wantSound=on;
@@ -275,7 +328,12 @@ function tick(){
   else if(liveRate>curRate) liveRate=Math.max(curRate,liveRate-maxDelta);
 
   applyLiveRate();
-  if(wantSound&&liveRate>=CONFIG.MIN_RATE&&audio.paused) audio.play().catch(()=>{});
+  // gentle watchdog: only resume if paused for a sustained moment (not instantly),
+  // so low-rate buffering/stall states aren't hammered with replay() every frame.
+  if(wantSound && liveRate>=CONFIG.MIN_RATE && audio.paused){
+    if(pausedAt===0) pausedAt=now;
+    if(now-pausedAt>600){ audio.play().catch(()=>{}); pausedAt=0; LOG('watchdog resume'); }
+  } else { pausedAt=0; }
 
   paint();
   scheduleTick();
@@ -476,6 +534,21 @@ makeHold(document.getElementById('endBtn'), CONFIG.HOLD_MS, ()=>{
   document.getElementById('app').style.visibility='hidden';
   document.getElementById('gate').style.display='flex';
 });
+
+// log panel controls
+document.getElementById('logToggle').onclick=()=>document.getElementById('logPanel').classList.toggle('open');
+document.getElementById('logClose').onclick=()=>document.getElementById('logPanel').classList.remove('open');
+document.getElementById('logClear').onclick=()=>{ logLines=[]; document.getElementById('logText').textContent=''; };
+document.getElementById('logCopy').onclick=async ()=>{
+  const txt=logLines.join('\n');
+  try{ await navigator.clipboard.writeText(txt); document.getElementById('logCopy').textContent='Copied!'; setTimeout(()=>document.getElementById('logCopy').textContent='Copy',1200); }
+  catch(e){
+    // fallback: select into a temporary textarea
+    const ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); document.getElementById('logCopy').textContent='Copied!'; }catch(_){ document.getElementById('logCopy').textContent='Copy failed'; }
+    setTimeout(()=>document.getElementById('logCopy').textContent='Copy',1200); ta.remove();
+  }
+};
 
 loadPlaylist();
 </script>
