@@ -160,6 +160,10 @@ const CONFIG = {
   SMOOTH_MS: 2500,      // rolling average on the driving metric
   RATE_DWELL_MS: 800,   // continuous rate is smoother, shorter dwell is fine
   STEP_THRESH: 3.0,     // accel above baseline to count as a footstep (raise if phantom steps)
+
+  // ---- rate smoothing (anti-stutter) ----
+  RATE_GLIDE_PER_SEC: 0.8,  // how fast actual rate slides toward target (units/sec). lower = smoother/slower
+  CONTINUOUS: true,         // if true, rate is fully continuous (no 0.10 stepping) for max smoothness
 };
 
 /* ============================================================================
@@ -171,7 +175,8 @@ let playlist=[];              // array of absolute mp3 URLs, alphabetical
 let trackIdx=0;
 let audio=document.getElementById('audio');
 let wantSound=false;         // motion wants audio on
-let curRate=0;
+let curRate=0;      // target rate from motion
+let liveRate=0;     // actual applied rate, glides toward curRate
 let gpsSpeedMph=0, cadenceSpm=0;
 let accelSamples=[], stepTimes=[], lastPeak=0, dynMean=9.81;
 let smoothBuf=[];
@@ -238,31 +243,41 @@ function setSound(on){
   paintState();
 }
 
-function applyRate(force){
+function applyLiveRate(){
   try{
-    if(curRate < CONFIG.MIN_RATE){
-      if(!audio.paused) audio.pause();
+    if(liveRate < CONFIG.MIN_RATE){
+      // truly below audible floor: only NOW is silence allowed (a real stop)
+      if(!audio.paused && !wantSound) audio.pause();
+      // if still wantSound but rate collapsed, hold at MIN so it doesn't click in/out
+      if(wantSound){ audio.playbackRate = CONFIG.MIN_RATE; }
     }else{
-      audio.playbackRate = curRate;
+      // seamless: just set the rate. NEVER pause/play here.
+      if(Math.abs(audio.playbackRate - liveRate) > 0.001){ audio.playbackRate = liveRate; }
       if(wantSound && audio.paused){ audio.play().catch(err=>{ lastAudioErr='play rej'; }); }
     }
   }catch(_){}
   paintRate();
 }
+// keep name for loadTrack's call
+function applyRate(){ applyLiveRate(); }
 
 /* ============================================================================
    Motion → rate
    ============================================================================ */
+let lastTickT=0;
 function tick(){
+  const now=performance.now();
+  const dt = lastTickT ? (now-lastTickT)/1000 : 0.1;
+  lastTickT = now;
+
   const still=frameIsStill();
   let raw, moving;
   if(mode==='cycle'){ raw=gpsSpeedMph; moving = gpsSpeedMph>=moveFloor() && !still; }
   else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving = cadenceSpm>=moveFloor() && !still; }
 
   const sm=smoothed(raw);
-  const now=performance.now();
 
-  // debounce sound on/off
+  // --- SOUND: play/pause ONLY on genuine start/stop, never for rate changes ---
   if(moving){
     stopSince=null; if(moveSince===null) moveSince=now;
     if(now-moveSince>=CONFIG.RESUME_MS) setSound(true);
@@ -271,19 +286,30 @@ function tick(){
     if(now-stopSince>=CONFIG.PAUSE_MS) setSound(false);
   }
 
-  // continuous rate: 0 at floor → 1.0 at goal, quantized to STEP
+  // --- RATE target: 0 at floor → 1.0 at goal ---
   let target=0;
   if(moving){
     const frac = Math.max(0, Math.min(1, sm / goalPace()));
     let r = frac * CONFIG.MAX_RATE;
-    r = Math.round(r / CONFIG.STEP) * CONFIG.STEP;      // 0.10 steps
+    if(!CONFIG.CONTINUOUS){ r = Math.round(r/CONFIG.STEP)*CONFIG.STEP; }
     r = Math.max(0, Math.min(CONFIG.MAX_RATE, r));
     target = r;
   }
-  // if below the audible floor, treat as silence (0)
   if(target < CONFIG.MIN_RATE) target = 0;
+  curRate = target;
 
-  if(target !== curRate){ curRate=target; applyRate(false); }
+  // --- GLIDE the live rate toward target so pitch slides, never jumps ---
+  const maxDelta = CONFIG.RATE_GLIDE_PER_SEC * dt;
+  if(liveRate < curRate) liveRate = Math.min(curRate, liveRate + maxDelta);
+  else if(liveRate > curRate) liveRate = Math.max(curRate, liveRate - maxDelta);
+
+  applyLiveRate();
+
+  // watchdog: if motion wants sound and rate is audible but audio somehow paused
+  // (stall/buffer/iOS hiccup), gently resume — this recovers cutouts automatically.
+  if(wantSound && liveRate>=CONFIG.MIN_RATE && audio.paused){
+    audio.play().catch(()=>{});
+  }
 
   paintMetric(); paintState();
   scheduleTick();
@@ -353,18 +379,19 @@ function paintMetric(){
   const g=goalPace();
   document.getElementById('goalLine').innerHTML = mode==='cycle'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
   document.getElementById('diag').textContent =
-    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\ntrk ${trackIdx+1}/${playlist.length}\nsnd ${wantSound?'want':'off'} ${audio.paused?'paused':'PLAYING'}\naud ${lastAudioErr}`;
+    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\ntrk ${trackIdx+1}/${playlist.length}\nsnd ${wantSound?'want':'off'} ${audio.paused?'paused':'PLAYING'}\naud ${lastAudioErr}`;
 }
 function paintRate(){
   const fill=document.getElementById('rateFill');
-  const pct=Math.round((curRate/CONFIG.MAX_RATE)*100);
+  const shown = audio.paused ? 0 : liveRate;
+  const pct=Math.round((shown/CONFIG.MAX_RATE)*100);
   fill.style.width=pct+'%';
-  fill.classList.toggle('paused', curRate<CONFIG.MIN_RATE);
-  document.getElementById('rateNum').textContent=curRate.toFixed(2);
+  fill.classList.toggle('paused', audio.paused);
+  document.getElementById('rateNum').textContent=shown.toFixed(2);
 }
 function paintState(){
   const s=document.getElementById('stateLabel');
-  const sounding = curRate>=CONFIG.MIN_RATE && !audio.paused;
+  const sounding = !audio.paused;
   s.classList.toggle('playing', sounding);
   s.classList.toggle('armed', armed && !sounding);
   if(sounding){ s.textContent = curRate>=CONFIG.MAX_RATE ? 'On pace — 1×' : 'Faster for 1×'; }
