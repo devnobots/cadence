@@ -377,6 +377,14 @@ function tick(){
   const now=performance.now();
   const dt=lastTickT?(now-lastTickT)/1000:0.1; lastTickT=now;
 
+  // Aggressively expire pedometer history the moment the user halts: if no step
+  // has landed within MAX_STEP_MS, wipe ALL step timestamps so a walk resumed
+  // minutes later never computes cadence against ancient data. Runs every frame,
+  // in every mode, independent of currentCadence()'s own trimming.
+  if(stepTimes.length && (now-stepTimes[stepTimes.length-1] > CONFIG.MAX_STEP_MS)){
+    stepTimes.length=0;
+  }
+
   const still=frameIsStill();
   let raw, moving;
   if(kind()==='gps'){ raw=gpsSpeedMph; moving=gpsSpeedMph>=moveFloor()&&!still; }
