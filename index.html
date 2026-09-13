@@ -48,14 +48,12 @@
 
   #app{flex:1;display:flex;flex-direction:column;visibility:hidden;}
   #app.visible{visibility:visible;}
-  .modechip{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);right:.9rem;border:1px solid var(--line);border-radius:2px;color:var(--ink-dim);font-weight:600;font-size:.8rem;letter-spacing:.06em;padding:.35rem .7rem;}
-  .diag{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);left:.9rem;color:var(--ink-dim);font-size:.72rem;line-height:1.35;font-variant-numeric:tabular-nums;white-space:pre;pointer-events:none;}
 
   /* upper area is non-interactive (pocket-safe) */
-  .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;pointer-events:none;}
-  .metric{font-weight:800;font-size:clamp(5rem,36vw,13rem);line-height:.8;letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
-  .unit{color:var(--ink-dim);font-weight:600;font-size:clamp(1rem,4vw,1.4rem);letter-spacing:.06em;}
-  .goalline{margin-top:.9rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
+  .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;padding-top:14vh;pointer-events:none;}
+  .metric{font-weight:800;font-size:clamp(6.5rem,42vw,17rem);line-height:.8;letter-spacing:-.04em;white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .unit{color:var(--ink-dim);font-weight:600;font-size:clamp(1.3rem,6vw,2rem);letter-spacing:.08em;margin-top:.4rem;}
+  .goalline{margin-top:1.4rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
   .goalline b{color:var(--ink);font-weight:600;}
   .state{margin-top:1rem;font-weight:600;font-size:1.15rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
   .state.playing{color:var(--live);}
@@ -122,9 +120,6 @@
 </div>
 
 <div id="app">
-  <div class="modechip" id="modeChip">CYCLE · CRUISE</div>
-  <div class="diag" id="diag"></div>
-
   <div class="readout">
     <div class="metric" id="metric">0</div>
     <div class="unit" id="unit">MPH</div>
@@ -209,7 +204,7 @@ const CONFIG = {
 const $=id=>document.getElementById(id);
 const el={
   gate:$('gate'), app:$('app'), startBtn:$('startBtn'), loadStatus:$('loadStatus'),
-  modeChip:$('modeChip'), diag:$('diag'), metric:$('metric'), unit:$('unit'),
+  metric:$('metric'), unit:$('unit'),
   goalLine:$('goalLine'), stateLabel:$('stateLabel'), rateFill:$('rateFill'), rateNum:$('rateNum'),
   logPanel:$('logPanel'), logText:$('logText'), logCopy:$('logCopy'),
 };
@@ -532,7 +527,7 @@ function tick(){
   } else { pausedAt=0; }
 
   paint(still);
-  if(now-lastBeat>=CONFIG.HEARTBEAT_MS){ lastBeat=now; LOG(el.diag.textContent.replace(/\n/g,' | ')); }
+  if(now-lastBeat>=CONFIG.HEARTBEAT_MS){ lastBeat=now; LOG(diagLine(still).replace(/\n/g,' | ')); }
   scheduleTick();
 }
 let lastBeat=0;
@@ -688,8 +683,10 @@ function paint(still){
   s.classList.toggle('warn',!!problem);
   s.textContent = sounding ? (liveRate>=CONFIG.MAX_RATE?'On pace — 1×':'Faster for 1×') : (problem || (armed?'Move to begin':''));
 
-  el.diag.textContent =
-    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}${gpsErr?' ('+gpsErr+')':''}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${still}\nsnd ${wantSound?'want':'off'} ${playing?'PLAYING':'stopped'}\naud ${lastAudioErr}\ntrk ${trackIdx+1}/${playlist.length}`;
+}
+function diagLine(still){
+  const g=goalPace();
+  return `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}${gpsErr?' ('+gpsErr+')':''}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${still}\nsnd ${wantSound?'want':'off'} ${playing?'PLAYING':'stopped'}\naud ${lastAudioErr}\ntrk ${trackIdx+1}/${playlist.length}`;
 }
 
 /* ============================================================================
@@ -801,7 +798,6 @@ el.startBtn.onclick=async ()=>{
   loadTrack(0,false);   // song 1 is already decoded: this only sets the current track
 
   armed=true;
-  el.modeChip.textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
   el.gate.classList.add('hidden');
   el.app.classList.add('visible');
   running=true;
