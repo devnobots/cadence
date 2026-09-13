@@ -159,6 +159,7 @@ const CONFIG = {
 
   SMOOTH_MS: 2500,      // rolling average on the driving metric
   RATE_DWELL_MS: 800,   // continuous rate is smoother, shorter dwell is fine
+  STEP_THRESH: 3.0,     // accel above baseline to count as a footstep (raise if phantom steps)
 };
 
 /* ============================================================================
@@ -177,6 +178,11 @@ let smoothBuf=[];
 let moveSince=null, stopSince=null;
 
 audio.preservesPitch=false; audio.mozPreservesPitch=false; audio.webkitPreservesPitch=false; // chipmunk on purpose
+let lastAudioErr='';
+audio.addEventListener('error', ()=>{ const e=audio.error; lastAudioErr = e?('err '+e.code):'err'; });
+audio.addEventListener('playing', ()=>{ lastAudioErr='playing'; });
+audio.addEventListener('stalled', ()=>{ lastAudioErr='stalled'; });
+audio.addEventListener('waiting', ()=>{ lastAudioErr='buffering'; });
 
 function goalPace(){ return CONFIG.PRESETS[mode][pace]; }
 function moveFloor(){ return CONFIG.MOVE_FLOOR[mode]; }
@@ -199,9 +205,7 @@ async function loadPlaylist(){
     if(!mp3s.length) throw new Error('no audio files found');
     // relative paths (same origin as this page when served from GitHub Pages);
     // fall back to raw URLs if opened elsewhere.
-    const sameOrigin = location.hostname.endsWith('github.io');
-    playlist = mp3s.map(n=> sameOrigin ? encodeURI(n)
-      : `https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
+    playlist = mp3s.map(n=> `https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
     status.textContent = `${playlist.length} songs ready`;
     startBtn.textContent='Start'; startBtn.disabled=false;
   }catch(err){
@@ -227,7 +231,7 @@ audio.addEventListener('ended', ()=>{ loadTrack(trackIdx+1, wantSound); });
 function setSound(on){
   wantSound=on;
   if(on){
-    if(audio.paused){ audio.play().catch(()=>{}); }
+    if(curRate>=CONFIG.MIN_RATE && audio.paused){ audio.play().catch(err=>{ lastAudioErr='play rej'; }); }
   }else{
     if(!audio.paused){ audio.pause(); }
   }
@@ -235,14 +239,12 @@ function setSound(on){
 }
 
 function applyRate(force){
-  // curRate already computed by tick(); just apply
   try{
     if(curRate < CONFIG.MIN_RATE){
-      // below floor => silence
       if(!audio.paused) audio.pause();
     }else{
       audio.playbackRate = curRate;
-      if(wantSound && audio.paused) audio.play().catch(()=>{});
+      if(wantSound && audio.paused){ audio.play().catch(err=>{ lastAudioErr='play rej'; }); }
     }
   }catch(_){}
   paintRate();
@@ -255,7 +257,7 @@ function tick(){
   const still=frameIsStill();
   let raw, moving;
   if(mode==='cycle'){ raw=gpsSpeedMph; moving = gpsSpeedMph>=moveFloor() && !still; }
-  else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving = cadenceSpm>=moveFloor(); }
+  else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving = cadenceSpm>=moveFloor() && !still; }
 
   const sm=smoothed(raw);
   const now=performance.now();
@@ -327,7 +329,9 @@ function frameIsStill(){
 }
 function detectStep(now,mag){
   dynMean=dynMean*0.95+mag*0.05;
-  if(mag>dynMean+1.4 && (now-lastPeak)>250){ lastPeak=now; stepTimes.push(now); }
+  // require a clearly stronger impact than baseline, and a longer refractory
+  // (330ms => max ~180spm) so holding/jostling the phone doesn't read as steps.
+  if(mag>dynMean+CONFIG.STEP_THRESH && (now-lastPeak)>330){ lastPeak=now; stepTimes.push(now); }
   const cut=now-CONFIG.CADENCE_WINDOW_MS;
   while(stepTimes.length && stepTimes[0]<cut) stepTimes.shift();
 }
@@ -349,7 +353,7 @@ function paintMetric(){
   const g=goalPace();
   document.getElementById('goalLine').innerHTML = mode==='cycle'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
   document.getElementById('diag').textContent =
-    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\ntrk ${trackIdx+1}/${playlist.length}`;
+    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\ntrk ${trackIdx+1}/${playlist.length}\nsnd ${wantSound?'want':'off'} ${audio.paused?'paused':'PLAYING'}\naud ${lastAudioErr}`;
 }
 function paintRate(){
   const fill=document.getElementById('rateFill');
@@ -392,9 +396,12 @@ document.getElementById('startBtn').onclick=async ()=>{
   window.addEventListener('devicemotion', onMotion);
   startGPS(); keepAwake();
 
-  // Prime audio inside the user gesture: load first track, play muted-ish then pause.
+  // Prime audio inside the user gesture. iOS only allows the FIRST play() from a
+  // user tap — so we must actually start it here (muted) to unlock the element.
   loadTrack(0, false);
-  audio.play().then(()=>{ audio.pause(); }).catch(()=>{});
+  audio.muted = true;
+  try{ await audio.play(); audio.pause(); audio.currentTime = 0; }catch(e){ /* will retry on move */ }
+  audio.muted = false;
 
   armed=true;
   document.getElementById('modeChip').textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
