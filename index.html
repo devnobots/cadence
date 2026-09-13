@@ -164,9 +164,9 @@ const CONFIG = {
 
   // ---- research-grade pedometer ----
   BP_LOW_HZ:0.7, BP_HIGH_HZ:3.5,   // gait band-pass (covers walk+jog)
-  PEAK_K:1.2,                       // adaptive threshold = mean + K*stddev of filtered signal
+  PEAK_K:0.9,                       // adaptive threshold = mean + K*stddev of filtered signal
   MIN_STEP_MS:260, MAX_STEP_MS:1500,// refractory + max gap (≈ 40–230 spm)
-  CADENCE_WINDOW_MS:3500,
+  CADENCE_WINDOW_MS:4000,
 
   HOLD_MS:2000,                     // hold-to-skip / hold-to-end duration
 };
@@ -253,7 +253,7 @@ function tick(){
   const still=frameIsStill();
   let raw, moving;
   if(kind()==='gps'){ raw=gpsSpeedMph; moving=gpsSpeedMph>=moveFloor()&&!still; }
-  else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving=cadenceSpm>=moveFloor(); }
+  else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving=stepRecently(); }
 
   const sm=smoothed(raw);
 
@@ -303,9 +303,10 @@ function startGPS(){
 }
 
 /* ---- research-grade pedometer: band-pass + adaptive peak-valley detection ---- */
-let bpLPz=0, bpHPz=0, bpPrev=0;        // simple 1-pole high+low pass = band-pass
-let stepTimes=[], lastStepT=0, lastMag=0, rising=false, lastPeakVal=0;
-let magMean=0, magVar=0;
+let bpLPz=0, bpHPz=0, bpPrev=0;
+let stepTimes=[], lastStepT=0, lastMag=0, rising=false;
+let magMean=0, magVar=0.5;   // seed variance so detection works immediately (no 4s warmup dead zone)
+let pedWarmup=0;
 
 function onMotion(e){
   const a=e.accelerationIncludingGravity||e.acceleration; if(!a) return;
@@ -329,8 +330,9 @@ function onMotion(e){
   const f=bpHPz;                            // band-passed sample (zero-centered)
 
   // ---- adaptive threshold: mean + K*stddev of filtered magnitude ----
-  magMean=magMean*0.98+f*0.02;
-  magVar=magVar*0.98+((f-magMean)**2)*0.02;
+  const arate = pedWarmup<100 ? 0.1 : 0.02; pedWarmup++;   // adapt fast for first ~2s, then settle
+  magMean=magMean*(1-arate)+f*arate;
+  magVar=magVar*(1-arate)+((f-magMean)**2)*arate;
   const thr=magMean+CONFIG.PEAK_K*Math.sqrt(magVar);
 
   // ---- peak detection: rising then falling through threshold = step ----
@@ -356,6 +358,11 @@ function frameIsStill(){
   const m=w.reduce((s,x)=>s+x.mag,0)/w.length;
   const v=w.reduce((s,x)=>s+(x.mag-m)**2,0)/w.length;
   return v<CONFIG.STILL_VARIANCE;
+}
+// "moving" for cadence modes = a step happened very recently. This is FAR more
+// stable than the cadence number (which is jumpy) and prevents music cutouts.
+function stepRecently(){
+  return stepTimes.length>0 && (performance.now()-stepTimes[stepTimes.length-1])<1200;
 }
 function currentCadence(){
   if(stepTimes.length<2) return 0;
@@ -443,6 +450,9 @@ document.getElementById('paceSuffer').onclick=()=>setPace('suffer');
 
 document.getElementById('startBtn').onclick=async ()=>{
   try{ if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function') await DeviceMotionEvent.requestPermission(); }catch(_){}
+  // reset pedometer state for a clean session
+  bpLPz=bpHPz=bpPrev=lastMag=magMean=0; magVar=0.5; pedWarmup=0; rising=false; stepTimes=[]; lastStepT=0;
+  smoothBuf=[]; liveRate=0;
   window.addEventListener('devicemotion',onMotion);
   startGPS(); keepAwake(); lockPortrait();
 
