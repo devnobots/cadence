@@ -149,7 +149,7 @@
   <div id="logText"></div>
 </div>
 
-<audio id="audio" preload="auto" crossorigin="anonymous"></audio>
+
 
 <script>
 /* ============================================================================
@@ -191,8 +191,7 @@ const CONFIG = {
    State
    ============================================================================ */
 let mode='cycle', pace='cruise', armed=false;
-let playlist=[], trackIdx=0, blobCache=[];
-const audio=document.getElementById('audio');
+let playlist=[], trackIdx=0;
 let wantSound=false, curRate=0, liveRate=0, pausedAt=0;
 let gpsSpeedMph=0, cadenceSpm=0;
 let accelSamples=[], smoothBuf=[], moveSince=null, stopSince=null;
@@ -206,13 +205,7 @@ function LOG(msg){
   if(el){ el.textContent=logLines.join('\n'); el.scrollTop=el.scrollHeight; }
 }
 
-audio.preservesPitch=false; audio.mozPreservesPitch=false; audio.webkitPreservesPitch=false;
-audio.addEventListener('error',()=>{ const e=audio.error; lastAudioErr=e?('err '+e.code):'err'; LOG('audio ERROR '+(e?e.code:'?')); });
-audio.addEventListener('playing',()=>{ lastAudioErr='playing'; LOG('event: playing rate='+audio.playbackRate.toFixed(2)); });
-audio.addEventListener('stalled',()=>{ lastAudioErr='stalled'; LOG('event: STALLED'); });
-audio.addEventListener('waiting',()=>{ lastAudioErr='buffering'; LOG('event: waiting/buffering'); });
-audio.addEventListener('pause',()=>{ LOG('event: pause'); });
-audio.addEventListener('ended',()=>{});
+// (Web Audio engine below replaces the old <audio> element event wiring)
 
 const kind=()=>CONFIG.METRIC_KIND[mode];
 const goalPace=()=>CONFIG.PRESETS[mode][pace];
@@ -231,12 +224,9 @@ async function loadPlaylist(){
       .map(x=>x.name).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
     if(!names.length) throw new Error('no audio files');
     playlist=names.map(n=>`https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
-    blobCache=new Array(playlist.length).fill(null);
     status.textContent=`${playlist.length} songs found`;
     startBtn.textContent='Start'; startBtn.disabled=false;
     LOG('playlist: '+playlist.length+' songs');
-    // begin prefetching first track fully into memory
-    prefetch(0);
   }catch(err){
     status.textContent='Could not load songs: '+err.message;
     startBtn.textContent='Start'; startBtn.disabled=false;
@@ -244,55 +234,120 @@ async function loadPlaylist(){
 }
 
 /* ============================================================================
-   Audio
+   Audio engine — Web Audio API (AudioBufferSourceNode).
+   The <audio> element stutters badly on iOS at playbackRate<1.0; Web Audio's
+   playbackRate is a smooth AudioParam that resamples cleanly (pitch shifts with
+   it = the chipmunk effect we want). We decode only the current + next track to
+   keep memory sane.
    ============================================================================ */
-// Fetch a whole track into memory as a blob URL so playback never touches the
-// network mid-song (fixes low-rate stutter caused by streaming stalls).
-async function prefetch(i){
-  i=(i+playlist.length)%playlist.length;
-  if(blobCache[i]) return blobCache[i];
-  try{
-    LOG('prefetch start #'+(i+1));
-    const res=await fetch(playlist[i]);
-    if(!res.ok) throw new Error('fetch '+res.status);
-    const buf=await res.blob();
-    const url=URL.createObjectURL(buf);
-    blobCache[i]=url;
-    LOG('prefetch done #'+(i+1)+' ('+(buf.size/1048576).toFixed(1)+'MB)');
-    return url;
-  }catch(err){ LOG('prefetch FAIL #'+(i+1)+': '+err.message); return null; }
+let actx=null, masterGain=null;
+let bufCache=[];              // decoded AudioBuffers by index (current+next only)
+let srcNode=null;            // current AudioBufferSourceNode
+let playing=false;           // is a source node currently started & not stopped
+let startCtxTime=0;          // actx.currentTime when current track (re)started
+let startOffset=0;           // buffer offset (s) at last (re)start
+let curBufIdx=-1;
+
+function initAudioCtx(){
+  if(actx) return;
+  const AC=window.AudioContext||window.webkitAudioContext;
+  actx=new AC();
+  masterGain=actx.createGain();
+  masterGain.gain.value=1;
+  masterGain.connect(actx.destination);
+  LOG('AudioContext created sr='+actx.sampleRate);
 }
 
-async function loadTrack(i,autoplay){
+// fetch + decode a track into an AudioBuffer (memory-heavy, so only near tracks)
+async function decodeTrack(i){
+  i=(i+playlist.length)%playlist.length;
+  if(bufCache[i]) return bufCache[i];
+  try{
+    LOG('decode start #'+(i+1));
+    const res=await fetch(playlist[i]); if(!res.ok) throw new Error('fetch '+res.status);
+    const arr=await res.arrayBuffer();
+    const buf=await actx.decodeAudioData(arr);
+    bufCache[i]=buf;
+    LOG('decode done #'+(i+1)+' ('+buf.duration.toFixed(0)+'s)');
+    // free far-away buffers to cap memory (keep current, prev, next)
+    for(let k=0;k<bufCache.length;k++){
+      if(bufCache[k] && k!==i && k!==(i+1)%playlist.length && k!==(i-1+playlist.length)%playlist.length && k!==curBufIdx){
+        bufCache[k]=null;
+      }
+    }
+    return buf;
+  }catch(err){ LOG('decode FAIL #'+(i+1)+': '+err.message); return null; }
+}
+
+function stopSource(){
+  if(srcNode){ try{ srcNode.onended=null; srcNode.stop(); }catch(_){}
+    try{ srcNode.disconnect(); }catch(_){} srcNode=null; }
+  playing=false;
+}
+
+// start playing current track's buffer at a given offset
+function startSource(buf, offset){
+  stopSource();
+  srcNode=actx.createBufferSource();
+  srcNode.buffer=buf;
+  srcNode.playbackRate.value=Math.max(0.0625, liveRate>0?liveRate:CONFIG.MIN_RATE);
+  srcNode.connect(masterGain);
+  srcNode.onended=()=>{ if(playing){ /* natural end */ LOG('track ended -> next'); playing=false; loadTrack(trackIdx+1,true); } };
+  offset=Math.max(0, Math.min(offset||0, buf.duration-0.05));
+  startOffset=offset; startCtxTime=actx.currentTime;
+  srcNode.start(0, offset);
+  playing=true;
+}
+
+async function loadTrack(i, autoplay){
   if(!playlist.length) return;
+  initAudioCtx();
   trackIdx=(i+playlist.length)%playlist.length;
   LOG('loadTrack #'+(trackIdx+1)+' autoplay='+autoplay);
-  // use in-memory blob if ready, else fall back to streaming URL while it loads
-  let src=blobCache[trackIdx];
-  if(!src){ src=playlist[trackIdx]; prefetch(trackIdx).then(u=>{ if(u && trackIdx===((i+playlist.length)%playlist.length) && audio.src!==u){ /* swap only if not yet playing far in */ } }); }
-  audio.src=src; audio.load();
-  if(autoplay) audio.play().catch(e=>LOG('play() rej: '+e.message));
-  try{ audio.playbackRate=Math.max(CONFIG.MIN_RATE,liveRate); }catch(_){}
-  // prefetch next track in background for seamless advance
-  prefetch(trackIdx+1);
+  const buf=await decodeTrack(trackIdx);
+  if(!buf) return;
+  curBufIdx=trackIdx;
+  if(autoplay || wantSound){ startSource(buf, 0); }
+  else { stopSource(); startOffset=0; }
+  decodeTrack(trackIdx+1); // prefetch next
 }
-audio.addEventListener('ended',()=>{ LOG('track ended -> next'); loadTrack(trackIdx+1,wantSound); });
+
+// how far into the current buffer we are right now (for pause/resume)
+function currentOffset(){
+  if(!srcNode) return startOffset;
+  const played=(actx.currentTime-startCtxTime)*srcNode.playbackRate.value;
+  return startOffset+played;
+}
 
 function setSound(on){
   wantSound=on;
-  if(on){ if(liveRate>=CONFIG.MIN_RATE&&audio.paused) audio.play().catch(()=>{lastAudioErr='play rej';}); }
-  else{ if(!audio.paused) audio.pause(); }
-}
-function applyLiveRate(){
-  try{
-    if(liveRate<CONFIG.MIN_RATE){
-      if(!audio.paused&&!wantSound) audio.pause();
-      if(wantSound) audio.playbackRate=CONFIG.MIN_RATE;
-    }else{
-      if(Math.abs(audio.playbackRate-liveRate)>0.001) audio.playbackRate=liveRate;
-      if(wantSound&&audio.paused) audio.play().catch(()=>{lastAudioErr='play rej';});
+  if(!actx) return;
+  if(on){
+    if(actx.state==='suspended') actx.resume();
+    if(!playing){
+      const buf=bufCache[curBufIdx>=0?curBufIdx:trackIdx];
+      if(buf) startSource(buf, currentOffset());
+      else loadTrack(trackIdx, true);
     }
-  }catch(_){}
+  }else{
+    if(playing){
+      // remember offset then stop (Web Audio nodes are one-shot)
+      const off=currentOffset();
+      stopSource();
+      startOffset=off;
+    }
+  }
+}
+
+function applyLiveRate(){
+  // smooth, seamless rate change — the whole reason we moved to Web Audio.
+  if(srcNode && playing){
+    const r=Math.max(0.0625, liveRate);
+    // setTargetAtTime glides the param to avoid clicks
+    try{ srcNode.playbackRate.setTargetAtTime(r, actx.currentTime, 0.05); }catch(_){ srcNode.playbackRate.value=r; }
+  }
+  // below MIN_RATE with no desire to play => stop (silence)
+  if(liveRate<CONFIG.MIN_RATE && !wantSound && playing){ const off=currentOffset(); stopSource(); startOffset=off; }
 }
 
 /* ============================================================================
@@ -328,11 +383,10 @@ function tick(){
   else if(liveRate>curRate) liveRate=Math.max(curRate,liveRate-maxDelta);
 
   applyLiveRate();
-  // gentle watchdog: only resume if paused for a sustained moment (not instantly),
-  // so low-rate buffering/stall states aren't hammered with replay() every frame.
-  if(wantSound && liveRate>=CONFIG.MIN_RATE && audio.paused){
+  // watchdog: if motion wants sound but nothing is playing, (re)start.
+  if(wantSound && liveRate>=CONFIG.MIN_RATE && !playing){
     if(pausedAt===0) pausedAt=now;
-    if(now-pausedAt>600){ audio.play().catch(()=>{}); pausedAt=0; LOG('watchdog resume'); }
+    if(now-pausedAt>400){ setSound(true); pausedAt=0; }
   } else { pausedAt=0; }
 
   paint();
@@ -442,19 +496,19 @@ function paint(){
   document.getElementById('goalLine').innerHTML = kind()==='gps'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
 
   const fill=document.getElementById('rateFill');
-  const shown=audio.paused?0:liveRate;
+  const shown=!playing?0:liveRate;
   fill.style.width=Math.round((shown/CONFIG.MAX_RATE)*100)+'%';
-  fill.classList.toggle('paused',audio.paused);
+  fill.classList.toggle('paused',!playing);
   document.getElementById('rateNum').textContent=shown.toFixed(2);
 
   const s=document.getElementById('stateLabel');
-  const sounding=!audio.paused;
+  const sounding=playing;
   s.classList.toggle('playing',sounding);
   s.classList.toggle('armed',armed&&!sounding);
   s.textContent = sounding ? (liveRate>=CONFIG.MAX_RATE?'On pace — 1×':'Faster for 1×') : (armed?'Move to begin':'');
 
   document.getElementById('diag').textContent =
-    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\nsnd ${wantSound?'want':'off'} ${audio.paused?'paused':'PLAYING'}\naud ${lastAudioErr}\ntrk ${trackIdx+1}/${playlist.length}`;
+    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\nsnd ${wantSound?'want':'off'} ${playing?'PLAYING':'stopped'}\naud ${lastAudioErr}\ntrk ${trackIdx+1}/${playlist.length}`;
 }
 
 /* ============================================================================
@@ -514,10 +568,12 @@ document.getElementById('startBtn').onclick=async ()=>{
   window.addEventListener('devicemotion',onMotion);
   startGPS(); keepAwake(); lockPortrait();
 
+  // Unlock AudioContext inside the user gesture (iOS requirement)
+  initAudioCtx();
+  try{ await actx.resume(); }catch(_){}
+  // play a tiny silent blip to fully unlock, then load first track
+  try{ const b=actx.createBuffer(1,1,actx.sampleRate); const sn=actx.createBufferSource(); sn.buffer=b; sn.connect(actx.destination); sn.start(0); }catch(_){}
   loadTrack(0,false);
-  audio.muted=true;
-  try{ await audio.play(); audio.pause(); audio.currentTime=0; }catch(_){}
-  audio.muted=false;
 
   armed=true;
   document.getElementById('modeChip').textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
@@ -530,7 +586,7 @@ document.getElementById('startBtn').onclick=async ()=>{
 makeHold(document.getElementById('nextBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx+1,wantSound));
 makeHold(document.getElementById('prevBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx-1,wantSound));
 makeHold(document.getElementById('endBtn'), CONFIG.HOLD_MS, ()=>{
-  armed=false; wantSound=false; try{audio.pause();}catch(_){}
+  armed=false; wantSound=false; stopSource();
   document.getElementById('app').style.visibility='hidden';
   document.getElementById('gate').style.display='flex';
 });
