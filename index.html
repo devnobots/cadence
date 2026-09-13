@@ -198,6 +198,9 @@ const CONFIG = {
 
   HOLD_MS:2000,                     // hold-to-skip / hold-to-end duration
   WATCHDOG_MS:400,
+
+  PREFETCH_MAX_MB:150,              // stop pre-downloading raw audio past this many MB (rest loads on demand)
+  HEARTBEAT_MS:5000,                // log a status line this often while running
 };
 
 /* ============================================================================
@@ -240,6 +243,7 @@ const moveFloor=()=>CONFIG.MOVE_FLOOR[mode];
    ============================================================================ */
 async function loadPlaylist(){
   const api=`https://api.github.com/repos/${CONFIG.REPO}/contents/?ref=${CONFIG.BRANCH}`;
+  const t0=performance.now();
   el.startBtn.disabled=true; el.startBtn.textContent='Loading…'; el.loadStatus.textContent='Finding songs…';
   try{
     const res=await fetch(api); if(!res.ok) throw new Error('list '+res.status);
@@ -248,9 +252,12 @@ async function loadPlaylist(){
       .map(x=>x.name).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
     if(!names.length) throw new Error('no audio files');
     playlist=names.map(n=>`https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
-    el.loadStatus.textContent=`${playlist.length} songs found`;
-    el.startBtn.textContent='Start'; el.startBtn.disabled=false;
-    LOG('playlist: '+playlist.length+' songs');
+    LOG('playlist: '+playlist.length+' songs ('+(performance.now()-t0).toFixed(0)+'ms)');
+    el.loadStatus.textContent=`${playlist.length} songs · loading song 1…`;
+    // Start becomes live the moment song 1 is decoded — the download+decode is
+    // the slow part, so it happens now, not after the Start tap.
+    initAudioCtx();
+    prefetchAll();
   }catch(err){
     // No songs = nothing to do. Offer a retry instead of a Start that does nothing.
     playlist=[];
@@ -269,6 +276,8 @@ async function loadPlaylist(){
    ============================================================================ */
 let actx=null, masterGain=null;
 let bufCache=[];              // decoded AudioBuffers by index (current+neighbours only)
+let bytesCache=[];            // raw downloaded files by index (cheap: ~1/10th the size of a decoded buffer)
+let bytesMB=0, prefetching=false, firstReady=false;
 let srcNode=null;             // current AudioBufferSourceNode
 let playing=false;            // is a source node currently started & not stopped
 let playCursor=0;             // accumulated playback position (s) into current buffer
@@ -292,21 +301,61 @@ function initAudioCtx(){
   LOG('AudioContext created sr='+actx.sampleRate);
 }
 
-// fetch + decode a track into an AudioBuffer (memory-heavy, so only near tracks)
-const decoding={};
 function wrapIdx(i){ return ((i%playlist.length)+playlist.length)%playlist.length; }
+
+// download raw bytes for one track (deduped)
+const fetching={};
+async function fetchTrack(i){
+  i=wrapIdx(i);
+  if(bytesCache[i]) return bytesCache[i];
+  if(fetching[i]) return fetching[i];
+  fetching[i]=(async()=>{
+    const t0=performance.now();
+    try{
+      const res=await fetch(playlist[i]); if(!res.ok) throw new Error('fetch '+res.status);
+      const arr=await res.arrayBuffer();
+      bytesCache[i]=arr; bytesMB+=arr.byteLength/1048576;
+      LOG('fetch done #'+(i+1)+' '+(arr.byteLength/1048576).toFixed(1)+'MB in '+(performance.now()-t0).toFixed(0)+'ms');
+      return arr;
+    }catch(err){ LOG('fetch FAIL #'+(i+1)+': '+err.message+' after '+(performance.now()-t0).toFixed(0)+'ms'); return null; }
+    finally{ delete fetching[i]; }
+  })();
+  return fetching[i];
+}
+
+// On page open: download every track in playlist order, one at a time, and
+// decode song 1 the moment its bytes land. Start unlocks when song 1 is decoded.
+async function prefetchAll(){
+  if(prefetching) return; prefetching=true;
+  for(let i=0;i<playlist.length;i++){
+    if(i>0 && bytesMB>CONFIG.PREFETCH_MAX_MB){ LOG('prefetch cap reached at #'+i+' ('+bytesMB.toFixed(0)+'MB); rest loads on demand'); break; }
+    const arr=await fetchTrack(i);
+    if(i===0){
+      const buf=arr?await decodeTrack(0):null;
+      if(buf){ firstReady=true; el.loadStatus.textContent=`${playlist.length} songs · ready`; el.startBtn.textContent='Start'; el.startBtn.disabled=false; }
+      else { el.loadStatus.textContent='Song 1 failed to load'; el.startBtn.textContent='Retry'; el.startBtn.disabled=false; }
+    } else if(!firstReady){ break; }
+    else { el.loadStatus.textContent=`${playlist.length} songs · ready (${i+1} cached)`; }
+  }
+  prefetching=false;
+  LOG('prefetch finished, '+bytesCache.filter(Boolean).length+'/'+playlist.length+' cached, '+bytesMB.toFixed(0)+'MB');
+}
+
+// decode a track into an AudioBuffer (memory-heavy, so only near tracks)
+const decoding={};
 async function decodeTrack(i){
   i=wrapIdx(i);
   if(bufCache[i]) return bufCache[i];
   if(decoding[i]) return decoding[i];   // a decode for this index is already running
   decoding[i]=(async()=>{
     try{
-      LOG('decode start #'+(i+1));
-      const res=await fetch(playlist[i]); if(!res.ok) throw new Error('fetch '+res.status);
-      const arr=await res.arrayBuffer();
-      const buf=await actx.decodeAudioData(arr);
+      const arr=await fetchTrack(i); if(!arr) throw new Error('no bytes');
+      const t0=performance.now();
+      LOG('decode start #'+(i+1)+' (ctx '+actx.state+')');
+      // decodeAudioData detaches the buffer it's given: pass a copy so the raw cache survives
+      const buf=await actx.decodeAudioData(arr.slice(0));
       bufCache[i]=buf;
-      LOG('decode done #'+(i+1)+' ('+buf.duration.toFixed(0)+'s)');
+      LOG('decode done #'+(i+1)+' '+buf.duration.toFixed(0)+'s in '+(performance.now()-t0).toFixed(0)+'ms');
       // free far-away buffers to cap memory (keep this, its neighbours, and whatever is playing)
       const keep=new Set([i, wrapIdx(i+1), wrapIdx(i-1), curBufIdx]);
       for(let k=0;k<bufCache.length;k++){ if(bufCache[k] && !keep.has(k)) bufCache[k]=null; }
@@ -319,6 +368,7 @@ async function decodeTrack(i){
 
 function stopSource(){
   if(srcNode){
+    LOG('stop @'+playCursor.toFixed(1)+'s');
     try{ srcNode.onended=null; srcNode.stop(); }catch(_){}
     try{ srcNode.disconnect(); }catch(_){}
     srcNode=null;
@@ -343,6 +393,7 @@ function startSource(buf, offset){
   playCursor=offset; lastAdvanceT=actx.currentTime;
   srcNode.start(0, offset);
   playing=true;
+  LOG('play #'+(trackIdx+1)+' @'+offset.toFixed(1)+'s rate '+appliedRate.toFixed(2));
 }
 
 async function loadTrack(i, autoplay){
@@ -403,6 +454,7 @@ function resumeCtx(){
 }
 
 function setSound(on){
+  if(on!==wantSound) LOG('sound '+(on?'WANT':'off')+' (rate '+liveRate.toFixed(2)+')');
   wantSound=on;
   if(!actx) return;
   if(on){
@@ -480,8 +532,10 @@ function tick(){
   } else { pausedAt=0; }
 
   paint(still);
+  if(now-lastBeat>=CONFIG.HEARTBEAT_MS){ lastBeat=now; LOG(el.diag.textContent.replace(/\n/g,' | ')); }
   scheduleTick();
 }
+let lastBeat=0;
 let lastRun=0;
 function scheduleTick(){
   if(!running) return;
@@ -506,6 +560,7 @@ function startGPS(){
   geoWatchId=navigator.geolocation.watchPosition(p=>{
     const ms=(p.coords.speed==null||isNaN(p.coords.speed))?0:p.coords.speed;
     gpsSpeedMph=Math.max(0,ms*2.23694);
+    if(!gpsLastT) LOG('first GPS fix, speed '+gpsSpeedMph.toFixed(1)+'mph, acc '+(p.coords.accuracy||0).toFixed(0)+'m, speed field '+(p.coords.speed==null?'null':'ok'));
     gpsLastT=performance.now();
     gpsErr='';
   },e=>{
@@ -532,6 +587,7 @@ function onMotion(e){
   const a=e.accelerationIncludingGravity||e.acceleration; if(!a) return;
   if(a.x==null&&a.y==null&&a.z==null) return;   // some browsers fire empty events without permission
   const now=performance.now();
+  if(!motionLastT) LOG('first motion sample');
   motionLastT=now;
   const mag=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
 
@@ -716,6 +772,8 @@ $('paceSuffer').onclick=()=>setPace('suffer');
 
 el.startBtn.onclick=async ()=>{
   if(!playlist.length){ loadPlaylist(); return; }   // button doubles as Retry
+  if(!firstReady){ prefetchAll(); return; }
+  LOG('START tapped');
 
   // Everything that needs the user gesture happens BEFORE any await: the motion
   // permission dialog can outlast iOS's transient activation window, and an
@@ -740,7 +798,7 @@ el.startBtn.onclick=async ()=>{
 
   window.addEventListener('devicemotion',onMotion);
   startGPS();
-  loadTrack(0,false);
+  loadTrack(0,false);   // song 1 is already decoded: this only sets the current track
 
   armed=true;
   el.modeChip.textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
@@ -771,7 +829,7 @@ $('logToggle').onclick=()=>el.logPanel.classList.toggle('open');
 $('logClose').onclick=()=>el.logPanel.classList.remove('open');
 $('logClear').onclick=()=>{ logLines=[]; el.logText.textContent=''; };
 el.logCopy.onclick=async ()=>{
-  const txt=logLines.join('\n');
+  const txt='Cadence log · '+logLines.length+' lines · '+new Date().toISOString()+'\n'+logLines.join('\n');
   const flash=t=>{ el.logCopy.textContent=t; setTimeout(()=>el.logCopy.textContent='Copy',1200); };
   try{ await navigator.clipboard.writeText(txt); flash('Copied!'); }
   catch(e){
