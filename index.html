@@ -48,13 +48,24 @@
 
   /* ---- Ride screen: full real estate, no player ---- */
   #app{flex:1;display:flex;flex-direction:column;visibility:hidden;}
-  .modechip{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);right:.9rem;border:1px solid var(--line);border-radius:2px;color:var(--ink-dim);font-weight:600;font-size:.8rem;letter-spacing:.06em;padding:.35rem .7rem;}
-  .diag{position:fixed;top:calc(env(safe-area-inset-top) + .8rem);left:.9rem;color:var(--ink-dim);font-size:.72rem;line-height:1.35;font-variant-numeric:tabular-nums;white-space:pre;}
+  .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;padding-top:4vh;}
 
-  .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;}
-  .metric{font-weight:800;font-size:clamp(5rem,36vw,13rem);line-height:.8;letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
-  .unit{color:var(--ink-dim);font-weight:600;font-size:clamp(1rem,4vw,1.4rem);letter-spacing:.06em;}
-  .goalline{margin-top:.9rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
+  /* gauge: 270° tick ring with a lime arc and rim pointer; the big digit lives inside it */
+  .gauge{position:relative;width:min(84vw,420px);aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;}
+  .gauge svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
+  .glow{position:absolute;inset:-12%;border-radius:50%;background:radial-gradient(circle at 50% 42%, rgba(198,255,74,.55) 0%, rgba(198,255,74,.12) 38%, transparent 62%);opacity:0;transition:opacity .4s ease;filter:blur(10px);}
+  .g-tick{stroke:#2a2a2a;stroke-width:3;stroke-linecap:round;}
+  .g-tick.on{stroke:var(--live);}
+  .g-tick.major{stroke-width:4;}
+  .g-track{fill:none;stroke:#1a1a1a;stroke-width:14;stroke-linecap:round;}
+  .g-fill{fill:none;stroke:var(--live);stroke-width:14;stroke-linecap:round;transition:stroke-dasharray .25s ease-out;}
+  .g-fill.paused{stroke:var(--pause);}
+  .g-fill-glow{fill:none;stroke:var(--live);stroke-width:20;stroke-linecap:round;opacity:.55;transition:stroke-dasharray .25s ease-out;}
+  .g-needle{fill:var(--ink);}
+  #needle{transition:transform .25s ease-out;}
+  .metric{position:relative;font-weight:800;font-size:clamp(5rem,30vw,11rem);line-height:.85;letter-spacing:-.04em;white-space:nowrap;font-variant-numeric:tabular-nums;margin-top:-.15em;}
+  .unit{position:relative;color:var(--ink-dim);font-weight:600;font-size:clamp(1rem,4.5vw,1.5rem);letter-spacing:.1em;margin-top:.2rem;}
+  .goalline{margin-top:-.4rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
   .goalline b{color:var(--ink);font-weight:600;}
   .state{margin-top:1rem;font-weight:600;font-size:1.15rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
   .state.playing{color:var(--live);}
@@ -62,13 +73,18 @@
   @keyframes armedpulse{0%,100%{opacity:1}50%{opacity:.45}}
   @media (prefers-reduced-motion:reduce){.state.armed{animation:none;}}
 
-  /* big continuous rate bar */
-  .ratewrap{width:min(80%,420px);margin-top:1.8rem;}
-  .ratebar{position:relative;height:14px;background:#141414;border:1px solid var(--line);border-radius:99px;overflow:hidden;}
-  .ratefill{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--live);transition:width .25s ease-out;}
-  .ratefill.paused{background:var(--pause);}
-  .ratenum{margin-top:.7rem;text-align:center;font-weight:800;font-size:1.6rem;font-variant-numeric:tabular-nums;color:var(--ink);}
+  .ratewrap{margin-top:.2rem;}
+  .ratenum{margin-top:0;text-align:center;font-weight:800;font-size:1.6rem;font-variant-numeric:tabular-nums;color:var(--ink);}
   .ratenum small{color:var(--ink-dim);font-weight:600;font-size:.6em;}
+
+  /* tempo bars: playback-rate history as a scrolling bar field; the rule is 1× (song tempo) */
+  .tempo{width:min(84vw,420px);margin-top:1rem;}
+  .tempo-head{display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:.6rem;letter-spacing:.12em;color:var(--ink-dim);margin-bottom:.35rem;}
+  .tempo svg{display:block;width:100%;height:72px;}
+  .t-rule{stroke:var(--ink-dim);stroke-width:1;stroke-dasharray:2 3;opacity:.7;}
+  .t-bar{stroke:#2a2a2a;stroke-width:2.2;stroke-linecap:round;}
+  .t-bar.on{stroke:var(--live);}
+  @media (max-height:700px){ .tempo svg{height:52px;} .tempo{margin-top:.6rem;} .gauge{width:min(70vw,360px);} }
 
   /* controls: skip + end only */
   .dock{display:flex;flex-direction:column;gap:.7rem;padding:1rem;border-top:1px solid var(--line);}
@@ -103,18 +119,31 @@
 </div>
 
 <div id="app">
-  <div class="modechip" id="modeChip">CYCLE · CRUISE</div>
-  <div class="diag" id="diag"></div>
-
   <div class="readout">
-    <div class="metric" id="metric">0</div>
-    <div class="unit" id="unit">MPH</div>
+    <div class="gauge" id="gauge">
+      <div class="glow" id="glow"></div>
+      <svg viewBox="0 0 360 360" aria-hidden="true">
+        <defs><filter id="gf" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter></defs>
+        <g id="ticks" transform="translate(180 180)"></g>
+        <path class="g-track" id="gTrack" pathLength="100"/>
+        <path class="g-fill-glow" id="gFillGlow" pathLength="100" filter="url(#gf)"/>
+        <path class="g-fill" id="gFill" pathLength="100"/>
+        <g id="needle" transform="translate(180 180) rotate(-135)"><polygon class="g-needle" points="-6,-190 6,-190 0,-176"/></g>
+      </svg>
+      <div class="metric" id="metric">0</div>
+      <div class="unit" id="unit">MPH</div>
+    </div>
     <div class="goalline" id="goalLine"></div>
     <div class="state" id="stateLabel"></div>
-
     <div class="ratewrap">
-      <div class="ratebar"><div class="ratefill" id="rateFill"></div></div>
       <div class="ratenum"><span id="rateNum">0.00</span><small>×</small></div>
+    </div>
+    <div class="tempo" id="tempo">
+      <div class="tempo-head"><span>TEMPO · LAST 30 S</span><span>1× = SONG TEMPO</span></div>
+      <svg id="tempoSvg" viewBox="0 0 400 72" preserveAspectRatio="none">
+        <line class="t-rule" x1="0" y1="6" x2="400" y2="6"/>
+        <g id="tempoBars"></g>
+      </svg>
     </div>
   </div>
 
@@ -348,15 +377,73 @@ function paintMetric(){
   else{ m.textContent=Math.round(cadenceSpm); u.textContent='STEPS / MIN'; }
   const g=goalPace();
   document.getElementById('goalLine').innerHTML = mode==='cycle'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
-  document.getElementById('diag').textContent =
-    `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}\nspm ${Math.round(cadenceSpm)}\nrate ${curRate.toFixed(2)}\ngoal ${g}\nstill ${frameIsStill()}\ntrk ${trackIdx+1}/${playlist.length}`;
 }
 function paintRate(){
-  const fill=document.getElementById('rateFill');
-  const pct=Math.round((curRate/CONFIG.MAX_RATE)*100);
-  fill.style.width=pct+'%';
-  fill.classList.toggle('paused', curRate<CONFIG.MIN_RATE);
-  document.getElementById('rateNum').textContent=curRate.toFixed(2);
+  const on = curRate>=CONFIG.MIN_RATE && !audio.paused;
+  const shown = on ? curRate : 0;
+  paintGauge(shown/CONFIG.MAX_RATE, on);
+  document.getElementById('rateNum').textContent=shown.toFixed(2);
+  tempoPush(shown, performance.now());
+}
+
+/* ---- gauge: built once, driven by paintGauge() ---- */
+const gauge={R:150,TICK_R:168,N:54,START:-135,SWEEP:270,ticks:[]};
+{
+  const $=id=>document.getElementById(id), c=180, r=gauge.R;
+  const pt=a=>{ const t=(a-90)*Math.PI/180; return [c+r*Math.cos(t), c+r*Math.sin(t)]; };
+  const [x0,y0]=pt(gauge.START), [x1,y1]=pt(gauge.START+gauge.SWEEP);
+  const d=`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 1 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+  ['gTrack','gFill','gFillGlow'].forEach(id=>$(id).setAttribute('d',d));
+  const tg=$('ticks');
+  for(let i=0;i<=gauge.N;i++){
+    const a=gauge.START+gauge.SWEEP*i/gauge.N, major=i%(gauge.N/4)===0;
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('class','g-tick'+(major?' major':''));
+    l.setAttribute('x1',0); l.setAttribute('y1',-gauge.TICK_R); l.setAttribute('x2',0); l.setAttribute('y2',-gauge.TICK_R+(major?14:8));
+    l.setAttribute('transform',`rotate(${a})`);
+    tg.appendChild(l); gauge.ticks.push(l);
+  }
+}
+function paintGauge(frac, on){
+  const $=id=>document.getElementById(id);
+  const pct=Math.max(0,Math.min(1,frac))*100;
+  $('gFill').style.strokeDasharray=`${pct} 100`;
+  $('gFill').style.opacity=pct>0?'1':'0';                 // round caps draw a dot even at zero length
+  $('gFill').classList.toggle('paused',!on);
+  $('gFillGlow').style.strokeDasharray=on?`${pct} 100`:'0 100';
+  $('needle').setAttribute('transform',`translate(180 180) rotate(${gauge.START+gauge.SWEEP*pct/100})`);
+  const lit=Math.round(gauge.N*pct/100);
+  gauge.ticks.forEach((t,i)=>t.classList.toggle('on', on && i<=lit && pct>0));
+  $('glow').style.opacity=on?(0.25+0.75*pct/100).toFixed(2):'0';
+}
+
+/* ---- tempo bars: 4 samples/s of playback rate, 30 s window, newest at right ---- */
+const tempo={W:400,TOP:6,BOT:70,HZ:4,WINDOW:120,buf:[],head:0,n:0,lastT:0,bars:[]};
+tempo.buf=new Array(tempo.WINDOW).fill(0);
+{
+  const g=document.getElementById('tempoBars'), xs=tempo.W/tempo.WINDOW;
+  for(let i=0;i<tempo.WINDOW;i++){
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    const x=(xs*(i+0.5)).toFixed(2);
+    l.setAttribute('class','t-bar'); l.setAttribute('x1',x); l.setAttribute('x2',x); l.setAttribute('y1',tempo.BOT); l.setAttribute('y2',tempo.BOT);
+    l.style.opacity='0';
+    g.appendChild(l); tempo.bars.push(l);
+  }
+}
+function tempoReset(){ tempo.n=0; tempo.head=0; tempo.lastT=0; tempo.bars.forEach(b=>{ b.setAttribute('y1',tempo.BOT); b.classList.remove('on'); b.style.opacity='0'; }); }
+function tempoPush(rate, now){
+  if(now-tempo.lastT<1000/tempo.HZ) return;
+  tempo.lastT=now;
+  tempo.buf[tempo.head]=rate; tempo.head=(tempo.head+1)%tempo.WINDOW; tempo.n=Math.min(tempo.n+1,tempo.WINDOW);
+  const {WINDOW,n,TOP,BOT,bars}=tempo, span=BOT-TOP;
+  for(let k=0;k<WINDOW;k++){
+    const i=k-(WINDOW-n), b=bars[k];
+    if(i<0){ b.style.opacity='0'; continue; }
+    const r=Math.max(0,Math.min(1,tempo.buf[(tempo.head-n+i+WINDOW)%WINDOW]/CONFIG.MAX_RATE));
+    b.setAttribute('y1',(BOT-Math.max(3,span*r)).toFixed(1));
+    b.classList.toggle('on', r>0);
+    b.style.opacity = r>0 ? (0.35+0.65*r).toFixed(2) : '1';
+  }
 }
 function paintState(){
   const s=document.getElementById('stateLabel');
@@ -396,8 +483,7 @@ document.getElementById('startBtn').onclick=async ()=>{
   loadTrack(0, false);
   audio.play().then(()=>{ audio.pause(); }).catch(()=>{});
 
-  armed=true;
-  document.getElementById('modeChip').textContent=`${mode.toUpperCase()} · ${pace.toUpperCase()}`;
+  armed=true; tempoReset();
   document.getElementById('gate').style.display='none';
   document.getElementById('app').style.visibility='visible';
   scheduleTick();
