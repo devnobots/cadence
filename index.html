@@ -8,13 +8,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black" />
 <meta name="theme-color" content="#000000" />
 <title>Cadence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;800&display=swap" />
 <style>
   :root{
     --bg:#000; --ink:#e9e4d8; --ink-dim:#6f6a5f;
     --live:#c6ff4a; --pause:#c94b3b; --line:#232323;
     --font:'Barlow Semi Condensed', system-ui, sans-serif;
   }
-  @import url('https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;800&display=swap');
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;touch-action:manipulation;}
   html,body{height:100%;}
   body{
@@ -24,33 +26,33 @@
     user-select:none;-webkit-user-select:none;
   }
 
-  /* ---- Start gate ---- */
-  #gate{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.6rem;padding:2rem;text-align:center;overflow-y:auto;}
+  #gate{position:fixed;inset:0;background:var(--bg);z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5rem;padding:2rem;text-align:center;overflow-y:auto;}
+  #gate.hidden{display:none;}
   #gate h1{font-weight:800;font-size:clamp(2.4rem,12vw,4.2rem);letter-spacing:-.02em;line-height:.92;}
   #gate h1 span{display:block;color:var(--ink-dim);font-weight:600;font-size:.34em;letter-spacing:.02em;margin-top:.6rem;}
-  .picklabel{color:var(--ink-dim);font-size:.8rem;letter-spacing:.08em;margin-bottom:-.6rem;}
-  .modepick,.pacepick{display:flex;gap:.65rem;}
+  .picklabel{color:var(--ink-dim);font-size:.8rem;letter-spacing:.08em;margin-bottom:-.5rem;}
+  .modepick,.pacepick{display:flex;gap:.6rem;flex-wrap:wrap;justify-content:center;}
   .modepick button,.pacepick button{
     background:transparent;border:1px solid var(--line);color:var(--ink);
     font-family:var(--font);font-weight:600;font-size:1.05rem;
-    padding:.85rem 1.6rem;border-radius:2px;cursor:pointer;display:flex;flex-direction:column;gap:.15rem;align-items:center;
+    padding:.85rem 1.5rem;border-radius:2px;cursor:pointer;display:flex;flex-direction:column;gap:.15rem;align-items:center;
   }
   .pacepick button .sub{color:var(--ink-dim);font-weight:400;font-size:.72rem;}
   .modepick button[aria-pressed="true"],.pacepick button[aria-pressed="true"]{border-color:var(--live);color:var(--live);}
   .pacepick button[aria-pressed="true"] .sub{color:var(--live);opacity:.7;}
-  #startBtn{
-    background:var(--live);color:#000;border:none;font-family:var(--font);font-weight:800;
-    font-size:1.5rem;letter-spacing:.01em;padding:1.1rem 3.5rem;border-radius:2px;cursor:pointer;margin-top:.4rem;
-  }
-  #startBtn:disabled{opacity:.35;}
-  .gatehint{color:var(--ink-dim);font-size:.9rem;max-width:22rem;line-height:1.4;}
-  #loadStatus{color:var(--ink-dim);font-size:.82rem;letter-spacing:.03em;min-height:1.2em;}
+  #startBtn{background:var(--live);color:#000;border:none;font-family:var(--font);font-weight:800;font-size:1.5rem;letter-spacing:.01em;padding:1.1rem 3.5rem;border-radius:2px;cursor:pointer;margin-top:.3rem;}
+  #startBtn:disabled{opacity:.35;cursor:default;}
+  .gatehint{color:var(--ink-dim);font-size:.88rem;max-width:22rem;line-height:1.4;}
+  #loadStatus{color:var(--ink-dim);font-size:.82rem;min-height:1.2em;}
+  button:focus-visible{outline:2px solid var(--live);outline-offset:2px;}
 
-  /* ---- Ride screen: full real estate, no player ---- */
   #app{flex:1;display:flex;flex-direction:column;visibility:hidden;}
-  .readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;padding-top:4vh;}
+  #app.visible{visibility:visible;}
 
-  /* gauge: 270° tick ring with a lime arc and rim pointer; the big digit lives inside it */
+  /* upper area is non-interactive (pocket-safe) */
+.readout{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.2rem;padding-top:4vh;pointer-events:none;}
+
+  /* gauge: 270° tick ring with a lime arc and needle; the big digit lives inside it */
   .gauge{position:relative;width:min(84vw,420px);aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;}
   .gauge svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;}
   .glow{position:absolute;inset:-12%;border-radius:50%;background:radial-gradient(circle at 50% 42%, rgba(198,255,74,.55) 0%, rgba(198,255,74,.12) 38%, transparent 62%);opacity:0;transition:opacity .4s ease;filter:blur(10px);}
@@ -58,11 +60,11 @@
   .g-tick.on{stroke:var(--live);}
   .g-tick.major{stroke-width:4;}
   .g-track{fill:none;stroke:#1a1a1a;stroke-width:14;stroke-linecap:round;}
-  .g-fill{fill:none;stroke:var(--live);stroke-width:14;stroke-linecap:round;transition:stroke-dasharray .25s ease-out;}
+  .g-fill{fill:none;stroke:var(--live);stroke-width:14;stroke-linecap:round;transition:stroke-dasharray .2s linear;}
   .g-fill.paused{stroke:var(--pause);}
-  .g-fill-glow{fill:none;stroke:var(--live);stroke-width:20;stroke-linecap:round;opacity:.55;transition:stroke-dasharray .25s ease-out;}
+  .g-fill-glow{fill:none;stroke:var(--live);stroke-width:20;stroke-linecap:round;opacity:.55;transition:stroke-dasharray .2s linear;}
   .g-needle{fill:var(--ink);}
-  #needle{transition:transform .25s ease-out;}
+  #needle{transition:transform .2s linear;}
   .metric{position:relative;font-weight:800;font-size:clamp(5rem,30vw,11rem);line-height:.85;letter-spacing:-.04em;white-space:nowrap;font-variant-numeric:tabular-nums;margin-top:-.15em;}
   .unit{position:relative;color:var(--ink-dim);font-weight:600;font-size:clamp(1rem,4.5vw,1.5rem);letter-spacing:.1em;margin-top:.2rem;}
   .goalline{margin-top:-.4rem;color:var(--ink-dim);font-size:.92rem;letter-spacing:.03em;}
@@ -70,11 +72,12 @@
   .state{margin-top:1rem;font-weight:600;font-size:1.15rem;letter-spacing:.04em;color:var(--pause);height:1.4em;}
   .state.playing{color:var(--live);}
   .state.armed{color:var(--live);animation:armedpulse 1.8s ease-in-out infinite;}
+  .state.warn{color:var(--pause);}
   @keyframes armedpulse{0%,100%{opacity:1}50%{opacity:.45}}
   @media (prefers-reduced-motion:reduce){.state.armed{animation:none;}}
 
   .ratewrap{margin-top:.2rem;}
-  .ratenum{margin-top:0;text-align:center;font-weight:800;font-size:1.6rem;font-variant-numeric:tabular-nums;color:var(--ink);}
+  .ratenum{margin-top:0;text-align:center;font-weight:800;font-size:1.6rem;font-variant-numeric:tabular-nums;}
   .ratenum small{color:var(--ink-dim);font-weight:600;font-size:.6em;}
 
   /* tempo bars: playback-rate history as a scrolling bar field; the rule is 1× (song tempo) */
@@ -84,15 +87,32 @@
   .t-rule{stroke:var(--ink-dim);stroke-width:1;stroke-dasharray:2 3;opacity:.7;}
   .t-bar{stroke:#2a2a2a;stroke-width:2.2;stroke-linecap:round;}
   .t-bar.on{stroke:var(--live);}
-  @media (max-height:700px){ .tempo svg{height:52px;} .tempo{margin-top:.6rem;} .gauge{width:min(70vw,360px);} }
+  @media (max-height:700px){ .tempo svg{height:52px;} .tempo{margin-top:.6rem;} }
 
-  /* controls: skip + end only */
-  .dock{display:flex;flex-direction:column;gap:.7rem;padding:1rem;border-top:1px solid var(--line);}
-  .transport{display:flex;gap:.6rem;}
-  .transport button{flex:1;background:transparent;border:1px solid var(--line);color:var(--ink-dim);font-family:var(--font);font-weight:600;font-size:1rem;letter-spacing:.02em;padding:.7rem 0;border-radius:2px;cursor:pointer;}
-  .transport button:active{color:var(--ink);border-color:var(--ink-dim);}
-  #endBtn{background:transparent;border:none;color:var(--ink-dim);font-family:var(--font);font-weight:600;font-size:.85rem;letter-spacing:.04em;padding:.2rem 0 0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;align-self:center;}
-  #endBtn:active{color:var(--pause);}
+  /* hold-to-act controls */
+  .dock{display:flex;flex-direction:column;gap:.7rem;padding:1rem;}
+  .transport{display:flex;gap:.7rem;}
+  .holdbtn{position:relative;flex:1;overflow:hidden;background:#0d0d0d;border:1px solid var(--line);color:var(--ink-dim);font-family:var(--font);font-weight:700;font-size:1.05rem;letter-spacing:.03em;padding:1.1rem 0;border-radius:3px;cursor:pointer;touch-action:none;}
+  .holdbtn .fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--live);opacity:.18;}
+  .holdbtn .lbl{position:relative;z-index:1;}
+  .holdbtn.armedhold{color:var(--ink);border-color:var(--ink-dim);}
+  #endBtn{position:relative;overflow:hidden;background:transparent;border:1px solid transparent;color:var(--ink-dim);font-family:var(--font);font-weight:600;font-size:.9rem;letter-spacing:.03em;padding:.7rem 0;border-radius:3px;cursor:pointer;align-self:center;width:60%;touch-action:none;}
+  #endBtn .fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--pause);opacity:.2;}
+  #endBtn .lbl{position:relative;z-index:1;text-decoration:underline;text-underline-offset:3px;}
+
+  /* portrait lock message */
+  #rotate{position:fixed;inset:0;background:var(--bg);z-index:99;display:none;flex-direction:column;align-items:center;justify-content:center;gap:1rem;text-align:center;padding:2rem;}
+  #rotate .big{font-weight:800;font-size:2rem;}
+  #rotate .sub{color:var(--ink-dim);}
+
+  /* log panel */
+  #logPanel{position:fixed;left:0;right:0;bottom:0;max-height:45vh;background:#0a0a0a;border-top:1px solid var(--line);z-index:80;display:none;flex-direction:column;}
+  #logPanel.open{display:flex;}
+  #logHead{display:flex;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid var(--line);align-items:center;}
+  #logHead button{background:transparent;border:1px solid var(--line);color:var(--ink);font-family:var(--font);font-weight:600;font-size:.8rem;padding:.4rem .8rem;border-radius:2px;cursor:pointer;}
+  #logText{flex:1;overflow-y:auto;font-family:ui-monospace,monospace;font-size:.68rem;line-height:1.35;color:var(--ink-dim);padding:.5rem .7rem;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text;}
+  #logToggle{position:fixed;bottom:calc(env(safe-area-inset-bottom) + .6rem);left:.6rem;z-index:81;background:#0a0a0a;border:1px solid var(--line);color:var(--ink-dim);font-family:var(--font);font-weight:600;font-size:.72rem;padding:.35rem .6rem;border-radius:2px;cursor:pointer;}
+  @media (orientation:landscape) and (max-height:500px){ #rotate{display:flex;} #gate,#app{display:none!important;} }
 </style>
 </head>
 <body>
@@ -102,20 +122,21 @@
 
   <div class="picklabel">ACTIVITY</div>
   <div class="modepick" role="group" aria-label="Activity">
-    <button id="modeCycle" aria-pressed="true">Cycle</button>
-    <button id="modeJog" aria-pressed="false">Jog</button>
+    <button type="button" id="modeWalk" aria-pressed="false">Walk</button>
+    <button type="button" id="modeJog" aria-pressed="false">Jog</button>
+    <button type="button" id="modeCycle" aria-pressed="true">Cycle</button>
   </div>
 
   <div class="picklabel">HOW HARD DO YOU WANT TO WORK FOR 1×?</div>
   <div class="pacepick" role="group" aria-label="Pace goal">
-    <button id="paceCrawl" aria-pressed="false">Crawl<span class="sub">easy 1×</span></button>
-    <button id="paceCruise" aria-pressed="true">Cruise<span class="sub">default</span></button>
-    <button id="paceSuffer" aria-pressed="false">Suffer<span class="sub">earn it</span></button>
+    <button type="button" id="paceCrawl" aria-pressed="false">Crawl<span class="sub">easy 1×</span></button>
+    <button type="button" id="paceCruise" aria-pressed="true">Cruise<span class="sub">default</span></button>
+    <button type="button" id="paceSuffer" aria-pressed="false">Suffer<span class="sub">earn it</span></button>
   </div>
 
-  <button id="startBtn" disabled>Loading…</button>
-  <div id="loadStatus">Finding songs…</div>
-  <p class="gatehint">Keep the screen on and the phone mounted or in a pocket. Grant location and motion when asked. The music speeds up as you do — hits 1× at your goal, and drops to silence when you stop.</p>
+  <button type="button" id="startBtn" disabled>Loading…</button>
+  <div id="loadStatus" aria-live="polite">Finding songs…</div>
+  <p class="gatehint">Keep the screen on, phone mounted or in a pocket. Grant motion &amp; location when asked. Music speeds up as you do, hits 1× at your goal, and falls silent when you stop.</p>
 </div>
 
 <div id="app">
@@ -123,11 +144,16 @@
     <div class="gauge" id="gauge">
       <div class="glow" id="glow"></div>
       <svg viewBox="0 0 360 360" aria-hidden="true">
-        <defs><filter id="gf" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter></defs>
+        <defs>
+          <filter id="gf" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="6"/></filter>
+        </defs>
+        <!-- tick ring: 270° sweep, gap at the bottom -->
         <g id="ticks" transform="translate(180 180)"></g>
+        <!-- track + lime arc (pathLength=100 so dasharray = percent) -->
         <path class="g-track" id="gTrack" pathLength="100"/>
         <path class="g-fill-glow" id="gFillGlow" pathLength="100" filter="url(#gf)"/>
         <path class="g-fill" id="gFill" pathLength="100"/>
+        <!-- needle -->
         <g id="needle" transform="translate(180 180) rotate(-135)"><polygon class="g-needle" points="-6,-190 6,-190 0,-176"/></g>
       </svg>
       <div class="metric" id="metric">0</div>
@@ -139,7 +165,7 @@
       <div class="ratenum"><span id="rateNum">0.00</span><small>×</small></div>
     </div>
     <div class="tempo" id="tempo">
-      <div class="tempo-head"><span>TEMPO · LAST 30 S</span><span>1× = SONG TEMPO</span></div>
+      <div class="tempo-head"><span>TEMPO · LAST <span id="tempoWin">30</span> S</span><span id="tempoRight">1× = SONG TEMPO</span></div>
       <svg id="tempoSvg" viewBox="0 0 400 72" preserveAspectRatio="none">
         <line class="t-rule" x1="0" y1="6" x2="400" y2="6"/>
         <g id="tempoBars"></g>
@@ -149,247 +175,568 @@
 
   <div class="dock">
     <div class="transport">
-      <button id="prevBtn" aria-label="Previous song">&#8249; Song</button>
-      <button id="nextBtn" aria-label="Next song">Song &#8250;</button>
+      <button type="button" class="holdbtn" id="prevBtn"><span class="fill"></span><span class="lbl">&#8249;&#8249; Hold</span></button>
+      <button type="button" class="holdbtn" id="nextBtn"><span class="fill"></span><span class="lbl">Hold &#8250;&#8250;</span></button>
     </div>
-    <button id="endBtn">End session</button>
+    <button type="button" id="endBtn"><span class="fill"></span><span class="lbl">Hold to end</span></button>
   </div>
 </div>
 
-<!-- invisible audio engine -->
-<audio id="audio" preload="auto" crossorigin="anonymous"></audio>
+<div id="rotate"><div class="big">Rotate to portrait</div><div class="sub">Cadence runs upright</div></div>
+
+<button type="button" id="logToggle">LOG</button>
+<div id="logPanel">
+  <div id="logHead">
+    <button type="button" id="logCopy">Copy</button>
+    <button type="button" id="logClear">Clear</button>
+    <button type="button" id="logClose">Close</button>
+  </div>
+  <div id="logText"></div>
+</div>
 
 <script>
+'use strict';
 /* ============================================================================
    TUNE ME
    ============================================================================ */
 const CONFIG = {
-  // GitHub repo holding the mp3s (same repo/branch as this file).
-  REPO: 'devnobots/cadence',
-  BRANCH: 'mp3',
+  REPO:'devnobots/cadence', BRANCH:'mp3',
 
-  // Continuous rate: silence below MIN_RATE, then step by STEP up to 1.0 at goal.
-  MIN_RATE: 0.10,      // lowest audible rate; below the first tier => silence
-  MAX_RATE: 1.00,      // reached at your goal pace
-  STEP: 0.10,          // rate quantization
+  MIN_RATE:0.10, MAX_RATE:1.00, STEP:0.10, CONTINUOUS:true,
+  FLOOR_RATE:0.0625,                // lowest rate Web Audio will be asked for (drone during the pause window)
 
-  // pace that maps to 1.0x, per mode + preset
-  PRESETS: {
-    cycle: { crawl:6,  cruise:12, suffer:18 },   // mph at 1.0x
-    jog:   { crawl:120, cruise:160, suffer:185 }, // spm at 1.0x
+  // Goal pace = value that maps to 1.0x playback.
+  // Cycle = mph (GPS). Walk & Jog = steps/min (cadence).
+  PRESETS:{
+    walk:  { crawl:95,  cruise:110, suffer:125 },  // spm ~ 2.0 / 3.0 / 3.5 mph
+    jog:   { crawl:140, cruise:160, suffer:175 },  // spm
+    cycle: { crawl:6,   cruise:12,  suffer:18  },  // mph
   },
-  MOVE_FLOOR: { cycle:1.0, jog:20 }, // below this (cycle also needs "still") => silence
+  UNIT:{ walk:'STEPS / MIN', jog:'STEPS / MIN', cycle:'MPH' },
+  METRIC_KIND:{ walk:'cadence', jog:'cadence', cycle:'gps' },
+  MOVE_FLOOR:{ walk:40, jog:60, cycle:1.0 },  // mph below which cycling = stopped (walk/jog use step recency instead)
 
-  RESUME_MS: 1000,
-  PAUSE_MS: 2500,
-  STILL_VARIANCE: 0.08,
-  ACCEL_WINDOW_MS: 1000,
-  CADENCE_WINDOW_MS: 3000,
+  RESUME_MS:1000, PAUSE_MS:2500,
+  STILL_VARIANCE:0.08, ACCEL_WINDOW_MS:1000,
+  GPS_STALE_MS:5000,                // no GPS fix for this long => treat speed as 0
+  SENSOR_WARN_MS:6000,              // no motion/GPS samples this long after start => show a hint
 
-  SMOOTH_MS: 2500,      // rolling average on the driving metric
-  RATE_DWELL_MS: 800,   // continuous rate is smoother, shorter dwell is fine
+  SMOOTH_MS:2200,
+  RATE_GLIDE_PER_SEC:0.8,
+  MAX_TICK_DT:0.5,                  // clamp dt after a background tab returns
+
+  // ---- pedometer ----
+  BP_LOW_HZ:0.7, BP_HIGH_HZ:3.5,    // gait band-pass (covers walk+jog)
+  PEAK_K:0.9,                       // adaptive threshold = mean + K*stddev of filtered signal
+  MIN_PEAK:0.3,                     // m/s^2 — hard floor on the threshold so sensor noise while still can't register steps
+  MIN_STEP_MS:260, MAX_STEP_MS:1500,// refractory + max gap (≈ 40–230 spm)
+  CADENCE_WINDOW_MS:4000,
+  STEP_RECENT_MS:1200,
+
+  HOLD_MS:2000,                     // hold-to-skip / hold-to-end duration
+  WATCHDOG_MS:400,
+
+  STRIP_WINDOW_S:30,                // seconds of history shown in the strip chart
+  STRIP_HZ:4,                       // samples per second pushed to the strip
+  PREFETCH_MAX_MB:150,              // stop pre-downloading raw audio past this many MB (rest loads on demand)
+  HEARTBEAT_MS:5000,                // log a status line this often while running
+};
+
+/* ============================================================================
+   DOM
+   ============================================================================ */
+const $=id=>document.getElementById(id);
+const el={
+  gate:$('gate'), app:$('app'), startBtn:$('startBtn'), loadStatus:$('loadStatus'),
+  metric:$('metric'), unit:$('unit'),
+  goalLine:$('goalLine'), stateLabel:$('stateLabel'), rateNum:$('rateNum'),
+  logPanel:$('logPanel'), logText:$('logText'), logCopy:$('logCopy'),
 };
 
 /* ============================================================================
    State
    ============================================================================ */
-let mode='cycle', pace='cruise';
-let armed=false;
-let playlist=[];              // array of absolute mp3 URLs, alphabetical
-let trackIdx=0;
-let audio=document.getElementById('audio');
-let wantSound=false;         // motion wants audio on
-let curRate=0;
-let gpsSpeedMph=0, cadenceSpm=0;
-let accelSamples=[], stepTimes=[], lastPeak=0, dynMean=9.81;
-let smoothBuf=[];
-let moveSince=null, stopSince=null;
+let mode='cycle', pace='cruise', armed=false, running=false;
+let playlist=[], trackIdx=0;
+let wantSound=false, curRate=0, liveRate=0, pausedAt=0;
+let gpsSpeedMph=0, gpsLastT=0, gpsErr='';
+let cadenceSpm=0, motionLastT=0, motionPerm='';
+let sessionStartT=0;
+let accelSamples=[], smoothBuf=[], moveSince=null, stopSince=null;
+let lastAudioErr='';
+let logLines=[];
+function LOG(msg){
+  const t=(performance.now()/1000).toFixed(2);
+  logLines.push(`[${t}] ${msg}`);
+  if(logLines.length>400) logLines.shift();
+  el.logText.textContent=logLines.join('\n');
+  el.logText.scrollTop=el.logText.scrollHeight;
+}
 
-audio.preservesPitch=false; audio.mozPreservesPitch=false; audio.webkitPreservesPitch=false; // chipmunk on purpose
-
-function goalPace(){ return CONFIG.PRESETS[mode][pace]; }
-function moveFloor(){ return CONFIG.MOVE_FLOOR[mode]; }
+const kind=()=>CONFIG.METRIC_KIND[mode];
+const goalPace=()=>CONFIG.PRESETS[mode][pace];
+const moveFloor=()=>CONFIG.MOVE_FLOOR[mode];
 
 /* ============================================================================
-   Load the song list from GitHub (alphabetical), no code edits needed
+   Playlist (auto-list from GitHub, alphabetical)
    ============================================================================ */
 async function loadPlaylist(){
-  const api = `https://api.github.com/repos/${CONFIG.REPO}/contents/?ref=${CONFIG.BRANCH}`;
-  const status=document.getElementById('loadStatus');
-  const startBtn=document.getElementById('startBtn');
+  const api=`https://api.github.com/repos/${CONFIG.REPO}/contents/?ref=${CONFIG.BRANCH}`;
+  const t0=performance.now();
+  el.startBtn.disabled=true; el.startBtn.textContent='Loading…'; el.loadStatus.textContent='Finding songs…';
   try{
-    const res = await fetch(api);
-    if(!res.ok) throw new Error('list '+res.status);
-    const items = await res.json();
-    const mp3s = items
-      .filter(x=>x.type==='file' && /\.(mp3|m4a|aac)$/i.test(x.name))
-      .map(x=>x.name)
-      .sort((a,b)=>a.localeCompare(b, undefined, {numeric:true, sensitivity:'base'}));
-    if(!mp3s.length) throw new Error('no audio files found');
-    // relative paths (same origin as this page when served from GitHub Pages);
-    // fall back to raw URLs if opened elsewhere.
-    const sameOrigin = location.hostname.endsWith('github.io');
-    playlist = mp3s.map(n=> sameOrigin ? encodeURI(n)
-      : `https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
-    status.textContent = `${playlist.length} songs ready`;
-    startBtn.textContent='Start'; startBtn.disabled=false;
+    const res=await fetch(api); if(!res.ok) throw new Error('list '+res.status);
+    const items=await res.json();
+    const names=items.filter(x=>x.type==='file'&&/\.(mp3|m4a|aac)$/i.test(x.name))
+      .map(x=>x.name).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true,sensitivity:'base'}));
+    if(!names.length) throw new Error('no audio files');
+    playlist=names.map(n=>`https://raw.githubusercontent.com/${CONFIG.REPO}/${CONFIG.BRANCH}/${encodeURIComponent(n)}`);
+    LOG('playlist: '+playlist.length+' songs ('+(performance.now()-t0).toFixed(0)+'ms)');
+    el.loadStatus.textContent=`${playlist.length} songs · loading song 1…`;
+    // Start becomes live the moment song 1 is decoded — the download+decode is
+    // the slow part, so it happens now, not after the Start tap.
+    initAudioCtx();
+    prefetchAll();
   }catch(err){
-    status.textContent = 'Could not load songs: '+err.message;
-    // still allow Start using raw fallback with a hardcoded first file if present
-    startBtn.textContent='Start'; startBtn.disabled=false;
+    // No songs = nothing to do. Offer a retry instead of a Start that does nothing.
+    playlist=[];
+    el.loadStatus.textContent='Could not load songs: '+err.message;
+    el.startBtn.textContent='Retry'; el.startBtn.disabled=false;
+    LOG('playlist FAIL: '+err.message);
   }
 }
 
 /* ============================================================================
-   Audio control
+   Audio engine — Web Audio API (AudioBufferSourceNode).
+   The <audio> element stutters badly on iOS at playbackRate<1.0; Web Audio's
+   playbackRate is a smooth AudioParam that resamples cleanly (pitch shifts with
+   it = the chipmunk effect we want). We decode only the current + next track to
+   keep memory sane.
    ============================================================================ */
-function loadTrack(i, autoplay){
-  if(!playlist.length) return;
-  trackIdx = (i + playlist.length) % playlist.length;
-  audio.src = playlist[trackIdx];
-  audio.load();
-  if(autoplay){ audio.play().catch(()=>{}); }
-  applyRate(true);
+let actx=null, masterGain=null;
+let bufCache=[];              // decoded AudioBuffers by index (current+neighbours only)
+let bytesCache=[];            // raw downloaded files by index (cheap: ~1/10th the size of a decoded buffer)
+let bytesMB=0, prefetching=false, firstReady=false;
+let srcNode=null;             // current AudioBufferSourceNode
+let playing=false;            // is a source node currently started & not stopped
+let playCursor=0;             // accumulated playback position (s) into current buffer
+let lastAdvanceT=0;           // actx.currentTime at last cursor advance
+let appliedRate=CONFIG.MIN_RATE; // the rate we last asked the AudioParam for (don't trust .value under automation)
+let curBufIdx=-1;
+let isLoading=false;          // guard: a decode/load is in flight
+let pendingIdx=null;          // a skip requested while a load was in flight
+let pendingAutoplay=false;
+
+function initAudioCtx(){
+  if(actx) return;
+  const AC=window.AudioContext||window.webkitAudioContext;
+  actx=new AC();
+  masterGain=actx.createGain();
+  masterGain.gain.value=1;
+  masterGain.connect(actx.destination);
+  // iOS 17+: without this, Web Audio is muted by the ringer/silent switch.
+  try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(_){}
+  actx.onstatechange=()=>LOG('actx state: '+actx.state);
+  LOG('AudioContext created sr='+actx.sampleRate);
 }
-audio.addEventListener('ended', ()=>{ loadTrack(trackIdx+1, wantSound); });
+
+function wrapIdx(i){ return ((i%playlist.length)+playlist.length)%playlist.length; }
+
+// download raw bytes for one track (deduped)
+const fetching={};
+async function fetchTrack(i){
+  i=wrapIdx(i);
+  if(bytesCache[i]) return bytesCache[i];
+  if(fetching[i]) return fetching[i];
+  fetching[i]=(async()=>{
+    const t0=performance.now();
+    try{
+      const res=await fetch(playlist[i]); if(!res.ok) throw new Error('fetch '+res.status);
+      const arr=await res.arrayBuffer();
+      bytesCache[i]=arr; bytesMB+=arr.byteLength/1048576;
+      LOG('fetch done #'+(i+1)+' '+(arr.byteLength/1048576).toFixed(1)+'MB in '+(performance.now()-t0).toFixed(0)+'ms');
+      return arr;
+    }catch(err){ LOG('fetch FAIL #'+(i+1)+': '+err.message+' after '+(performance.now()-t0).toFixed(0)+'ms'); return null; }
+    finally{ delete fetching[i]; }
+  })();
+  return fetching[i];
+}
+
+// On page open: download every track in playlist order, one at a time, and
+// decode song 1 the moment its bytes land. Start unlocks when song 1 is decoded.
+async function prefetchAll(){
+  if(prefetching) return; prefetching=true;
+  for(let i=0;i<playlist.length;i++){
+    if(i>0 && bytesMB>CONFIG.PREFETCH_MAX_MB){ LOG('prefetch cap reached at #'+i+' ('+bytesMB.toFixed(0)+'MB); rest loads on demand'); break; }
+    const arr=await fetchTrack(i);
+    if(i===0){
+      const buf=arr?await decodeTrack(0):null;
+      if(buf){ firstReady=true; el.loadStatus.textContent=`${playlist.length} songs · ready`; el.startBtn.textContent='Start'; el.startBtn.disabled=false; }
+      else { el.loadStatus.textContent='Song 1 failed to load'; el.startBtn.textContent='Retry'; el.startBtn.disabled=false; }
+    } else if(!firstReady){ break; }
+    else { el.loadStatus.textContent=`${playlist.length} songs · ready (${i+1} cached)`; }
+  }
+  prefetching=false;
+  LOG('prefetch finished, '+bytesCache.filter(Boolean).length+'/'+playlist.length+' cached, '+bytesMB.toFixed(0)+'MB');
+}
+
+// decode a track into an AudioBuffer (memory-heavy, so only near tracks)
+const decoding={};
+async function decodeTrack(i){
+  i=wrapIdx(i);
+  if(bufCache[i]) return bufCache[i];
+  if(decoding[i]) return decoding[i];   // a decode for this index is already running
+  decoding[i]=(async()=>{
+    try{
+      const arr=await fetchTrack(i); if(!arr) throw new Error('no bytes');
+      const t0=performance.now();
+      LOG('decode start #'+(i+1)+' (ctx '+actx.state+')');
+      // decodeAudioData detaches the buffer it's given: pass a copy so the raw cache survives
+      const buf=await actx.decodeAudioData(arr.slice(0));
+      bufCache[i]=buf;
+      LOG('decode done #'+(i+1)+' '+buf.duration.toFixed(0)+'s in '+(performance.now()-t0).toFixed(0)+'ms');
+      // free far-away buffers to cap memory (keep this, its neighbours, and whatever is playing)
+      const keep=new Set([i, wrapIdx(i+1), wrapIdx(i-1), curBufIdx]);
+      for(let k=0;k<bufCache.length;k++){ if(bufCache[k] && !keep.has(k)) bufCache[k]=null; }
+      return buf;
+    }catch(err){ lastAudioErr='decode #'+(i+1)+' '+err.message; LOG('decode FAIL #'+(i+1)+': '+err.message); return null; }
+    finally{ delete decoding[i]; }
+  })();
+  return decoding[i];
+}
+
+function stopSource(){
+  if(srcNode){
+    LOG('stop @'+playCursor.toFixed(1)+'s');
+    try{ srcNode.onended=null; srcNode.stop(); }catch(_){}
+    try{ srcNode.disconnect(); }catch(_){}
+    srcNode=null;
+  }
+  playing=false;
+}
+
+// start playing current track's buffer at a given offset
+function startSource(buf, offset){
+  stopSource();
+  srcNode=actx.createBufferSource();
+  srcNode.buffer=buf;
+  appliedRate=Math.max(CONFIG.FLOOR_RATE, liveRate>0?liveRate:CONFIG.MIN_RATE);
+  srcNode.playbackRate.value=appliedRate;
+  srcNode.connect(masterGain);
+  const node=srcNode;
+  srcNode.onended=()=>{
+    // only a natural end reaches here (stopSource nulls the handler first)
+    if(playing && node===srcNode){ LOG('track ended -> next'); playing=false; loadTrack(trackIdx+1,true); }
+  };
+  offset=Math.max(0, Math.min(offset||0, buf.duration-0.05));
+  playCursor=offset; lastAdvanceT=actx.currentTime;
+  srcNode.start(0, offset);
+  playing=true;
+  LOG('play #'+(trackIdx+1)+' @'+offset.toFixed(1)+'s rate '+appliedRate.toFixed(2));
+}
+
+async function loadTrack(i, autoplay){
+  if(!playlist.length) return;
+  const wantIdx=wrapIdx(i);
+  // Already on this track with a decoded buffer: just (re)start it if sound is wanted.
+  if(wantIdx===curBufIdx && bufCache[curBufIdx]){
+    trackIdx=wantIdx;
+    if(autoplay||wantSound) startSource(bufCache[curBufIdx], currentOffset());
+    return;
+  }
+  // Never run two loads at once. Remember the latest request and replay it after.
+  if(isLoading){ pendingIdx=wantIdx; pendingAutoplay=pendingAutoplay||!!autoplay; return; }
+  isLoading=true;
+  initAudioCtx();
+  trackIdx=wantIdx;
+  LOG('loadTrack #'+(trackIdx+1)+' autoplay='+!!autoplay);
+  let buf=await decodeTrack(trackIdx);
+
+  // A bad file must not stall the session: step forward until something decodes.
+  let hops=0;
+  while(!buf && hops<playlist.length-1){
+    hops++; trackIdx=wrapIdx(trackIdx+1);
+    LOG('skipping to #'+(trackIdx+1));
+    buf=await decodeTrack(trackIdx);
+  }
+  isLoading=false;
+
+  if(pendingIdx!==null && pendingIdx!==trackIdx){
+    const p=pendingIdx, pa=pendingAutoplay||autoplay||wantSound;
+    pendingIdx=null; pendingAutoplay=false;
+    return loadTrack(p, pa);
+  }
+  pendingIdx=null;
+
+  if(!buf){ lastAudioErr='no playable track'; pendingAutoplay=false; return; }
+  curBufIdx=trackIdx;
+  if(autoplay||pendingAutoplay||wantSound){ startSource(buf, 0); }
+  else { stopSource(); playCursor=0; }
+  pendingAutoplay=false;
+  decodeTrack(trackIdx+1); // prefetch next (decodeTrack has its own cache guard)
+}
+
+// Advance the playback cursor incrementally using the rate we last applied over
+// the small dt since the last advance. Accumulating avoids the (elapsed*rate)
+// bug where a later rate change would distort the whole elapsed span.
+function advanceCursor(){
+  if(!playing||!srcNode||!actx) return;
+  const t=actx.currentTime;
+  const dt=t-lastAdvanceT; lastAdvanceT=t;
+  playCursor += dt * appliedRate;
+}
+function currentOffset(){ advanceCursor(); return playCursor; }
+
+function resumeCtx(){
+  if(!actx) return;
+  if(actx.state==='suspended'||actx.state==='interrupted'){ actx.resume().catch(e=>{ lastAudioErr='resume '+e.message; }); }
+}
 
 function setSound(on){
+  if(on!==wantSound) LOG('sound '+(on?'WANT':'off')+' (rate '+liveRate.toFixed(2)+')');
   wantSound=on;
+  if(!actx) return;
   if(on){
-    if(audio.paused){ audio.play().catch(()=>{}); }
+    resumeCtx();
+    // Starting is gated on liveRate >= MIN_RATE, same as the watchdog, so slow
+    // movement below the floor is silent rather than a 0.06x drone.
+    if(!playing && liveRate>=CONFIG.MIN_RATE){
+      const buf=bufCache[curBufIdx>=0?curBufIdx:trackIdx];
+      if(buf) startSource(buf, currentOffset());
+      else if(!isLoading) loadTrack(trackIdx, true);
+    }
   }else{
-    if(!audio.paused){ audio.pause(); }
+    if(playing){ const off=currentOffset(); stopSource(); playCursor=off; }
   }
-  paintState();
 }
 
-function applyRate(force){
-  // curRate already computed by tick(); just apply
-  try{
-    if(curRate < CONFIG.MIN_RATE){
-      // below floor => silence
-      if(!audio.paused) audio.pause();
-    }else{
-      audio.playbackRate = curRate;
-      if(wantSound && audio.paused) audio.play().catch(()=>{});
-    }
-  }catch(_){}
-  paintRate();
+function applyLiveRate(){
+  if(srcNode && playing){
+    const r=Math.max(CONFIG.FLOOR_RATE, liveRate);
+    appliedRate=r;
+    // setTargetAtTime glides the param to avoid clicks
+    try{ srcNode.playbackRate.setTargetAtTime(r, actx.currentTime, 0.05); }catch(_){ srcNode.playbackRate.value=r; }
+  }
+  // below MIN_RATE with no desire to play => stop (silence)
+  if(liveRate<CONFIG.MIN_RATE && !wantSound && playing){ const off=currentOffset(); stopSource(); playCursor=off; }
 }
 
 /* ============================================================================
-   Motion → rate
+   Main loop
    ============================================================================ */
+let lastTickT=0;
 function tick(){
+  if(!running) return;
+  const now=performance.now();
+  const dt=Math.min(CONFIG.MAX_TICK_DT, lastTickT?(now-lastTickT)/1000:0.1); lastTickT=now;
+
   const still=frameIsStill();
   let raw, moving;
-  if(mode==='cycle'){ raw=gpsSpeedMph; moving = gpsSpeedMph>=moveFloor() && !still; }
-  else{ cadenceSpm=currentCadence(); raw=cadenceSpm; moving = cadenceSpm>=moveFloor(); }
+  if(kind()==='gps'){
+    // a stale fix (tunnel, indoors, sensor asleep) must not keep the music going
+    if(gpsLastT && now-gpsLastT>CONFIG.GPS_STALE_MS) gpsSpeedMph=0;
+    raw=gpsSpeedMph; moving=gpsSpeedMph>=moveFloor()&&!still;
+  } else {
+    cadenceSpm=currentCadence(); raw=cadenceSpm;
+    moving=stepRecently()&&!still;
+  }
 
   const sm=smoothed(raw);
-  const now=performance.now();
 
-  // debounce sound on/off
-  if(moving){
-    stopSince=null; if(moveSince===null) moveSince=now;
-    if(now-moveSince>=CONFIG.RESUME_MS) setSound(true);
-  }else{
-    moveSince=null; if(stopSince===null) stopSince=now;
-    if(now-stopSince>=CONFIG.PAUSE_MS) setSound(false);
-  }
+  if(moving){ stopSince=null; if(moveSince===null)moveSince=now; if(now-moveSince>=CONFIG.RESUME_MS) setSound(true); }
+  else{ moveSince=null; if(stopSince===null)stopSince=now; if(now-stopSince>=CONFIG.PAUSE_MS) setSound(false); }
 
-  // continuous rate: 0 at floor → 1.0 at goal, quantized to STEP
   let target=0;
   if(moving){
-    const frac = Math.max(0, Math.min(1, sm / goalPace()));
-    let r = frac * CONFIG.MAX_RATE;
-    r = Math.round(r / CONFIG.STEP) * CONFIG.STEP;      // 0.10 steps
-    r = Math.max(0, Math.min(CONFIG.MAX_RATE, r));
-    target = r;
+    const frac=Math.max(0,Math.min(1, sm/goalPace()));
+    let r=frac*CONFIG.MAX_RATE;
+    if(!CONFIG.CONTINUOUS) r=Math.round(r/CONFIG.STEP)*CONFIG.STEP;
+    target=Math.max(0,Math.min(CONFIG.MAX_RATE,r));
   }
-  // if below the audible floor, treat as silence (0)
-  if(target < CONFIG.MIN_RATE) target = 0;
+  if(target<CONFIG.MIN_RATE) target=0;
+  curRate=target;
 
-  if(target !== curRate){ curRate=target; applyRate(false); }
+  const maxDelta=CONFIG.RATE_GLIDE_PER_SEC*dt;
+  if(liveRate<curRate) liveRate=Math.min(curRate,liveRate+maxDelta);
+  else if(liveRate>curRate) liveRate=Math.max(curRate,liveRate-maxDelta);
 
-  paintMetric(); paintState();
+  advanceCursor();
+  applyLiveRate();
+  // watchdog: if motion wants sound and we have a decoded buffer but aren't
+  // playing, start ONCE. Never touches loadTrack, never stampedes a decode.
+  if(wantSound && liveRate>=CONFIG.MIN_RATE && !playing && !isLoading){
+    const buf=bufCache[curBufIdx];
+    if(buf){ if(pausedAt===0) pausedAt=now; if(now-pausedAt>CONFIG.WATCHDOG_MS){ resumeCtx(); startSource(buf, currentOffset()); pausedAt=0; } }
+    else { pausedAt=0; } // no buffer yet — wait for decode, don't reload
+  } else { pausedAt=0; }
+
+  paint(still);
+  stripPush(kind()==='gps'?gpsSpeedMph:cadenceSpm, playing?liveRate:0, now);
+  if(now-lastBeat>=CONFIG.HEARTBEAT_MS){ lastBeat=now; LOG(diagLine(still).replace(/\n/g,' | ')); }
   scheduleTick();
 }
+let lastBeat=0;
 let lastRun=0;
-function scheduleTick(){ requestAnimationFrame(t=>{ if(t-lastRun>100){ lastRun=t; tick(); } else scheduleTick(); }); }
+function scheduleTick(){
+  if(!running) return;
+  requestAnimationFrame(t=>{ if(!running) return; if(t-lastRun>80){ lastRun=t; tick(); } else scheduleTick(); });
+}
 
-/* smoothing */
 function smoothed(raw){
   const now=performance.now();
   smoothBuf.push({t:now,v:raw});
   const cut=now-CONFIG.SMOOTH_MS;
-  while(smoothBuf.length && smoothBuf[0].t<cut) smoothBuf.shift();
+  while(smoothBuf.length&&smoothBuf[0].t<cut) smoothBuf.shift();
   return smoothBuf.reduce((s,x)=>s+x.v,0)/smoothBuf.length;
 }
 
 /* ============================================================================
    Sensors
    ============================================================================ */
+let geoWatchId=null;
 function startGPS(){
-  if(!('geolocation' in navigator)) return;
-  navigator.geolocation.watchPosition(p=>{
+  if(!('geolocation' in navigator)){ gpsErr='no geolocation'; return; }
+  gpsErr='';
+  geoWatchId=navigator.geolocation.watchPosition(p=>{
     const ms=(p.coords.speed==null||isNaN(p.coords.speed))?0:p.coords.speed;
-    gpsSpeedMph=Math.max(0, ms*2.23694);
-  },()=>{},{enableHighAccuracy:true,maximumAge:1000,timeout:8000});
+    gpsSpeedMph=Math.max(0,ms*2.23694);
+    if(!gpsLastT) LOG('first GPS fix, speed '+gpsSpeedMph.toFixed(1)+'mph, acc '+(p.coords.accuracy||0).toFixed(0)+'m, speed field '+(p.coords.speed==null?'null':'ok'));
+    gpsLastT=performance.now();
+    gpsErr='';
+  },e=>{
+    gpsErr=e.code===1?'denied':e.code===2?'unavailable':'timeout';
+    LOG('gps error: '+gpsErr+' '+e.message);
+  },{enableHighAccuracy:true,maximumAge:1000,timeout:8000});
 }
+function stopGPS(){
+  if(geoWatchId!==null){ try{ navigator.geolocation.clearWatch(geoWatchId); }catch(_){} geoWatchId=null; }
+}
+
+/* ---- pedometer: band-pass + adaptive peak detection ---- */
+let bpLPz=0, bpHPz=0, bpPrev=0;
+let stepTimes=[], lastStepT=0, lastMag=0, rising=false;
+let magMean=0, magVar=0.5;   // seed variance so detection works immediately (no warmup dead zone)
+let pedWarmup=0, motionPrevT=0;
+
+function resetPedometer(){
+  bpLPz=bpHPz=bpPrev=lastMag=magMean=0; magVar=0.5; pedWarmup=0; rising=false;
+  stepTimes=[]; lastStepT=0; motionPrevT=0; motionLastT=0; accelSamples=[];
+}
+
 function onMotion(e){
   const a=e.accelerationIncludingGravity||e.acceleration; if(!a) return;
-  const mag=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
+  if(a.x==null&&a.y==null&&a.z==null) return;   // some browsers fire empty events without permission
   const now=performance.now();
+  if(!motionLastT) LOG('first motion sample');
+  motionLastT=now;
+  const mag=Math.sqrt((a.x||0)**2+(a.y||0)**2+(a.z||0)**2);
+
+  // rolling stats for still-detection
   accelSamples.push({t:now,mag});
-  const cut=now-Math.max(CONFIG.ACCEL_WINDOW_MS,CONFIG.CADENCE_WINDOW_MS);
-  while(accelSamples.length && accelSamples[0].t<cut) accelSamples.shift();
-  if(mode==='jog') detectStep(now,mag);
+  const cut=now-CONFIG.ACCEL_WINDOW_MS;
+  while(accelSamples.length&&accelSamples[0].t<cut) accelSamples.shift();
+
+  // real sample interval (iOS ~60Hz, Android anywhere from 50 to 200Hz) — a fixed
+  // 50Hz assumption shifts the band edges by up to 4x on fast sensors
+  let dt=motionPrevT?(now-motionPrevT)/1000:0.02; motionPrevT=now;
+  dt=Math.max(0.004, Math.min(0.1, dt));
+
+  // ---- band-pass filter (approx): remove gravity/drift (HP) + chatter (LP) ----
+  const rcLow=1/(2*Math.PI*CONFIG.BP_HIGH_HZ);
+  const aLow=dt/(rcLow+dt);
+  bpLPz=bpLPz+aLow*(mag-bpLPz);            // low-pass
+  const rcHigh=1/(2*Math.PI*CONFIG.BP_LOW_HZ);
+  const aHigh=rcHigh/(rcHigh+dt);
+  bpHPz=aHigh*(bpHPz+bpLPz-bpPrev);        // high-pass on the low-passed signal
+  bpPrev=bpLPz;
+  const f=bpHPz;                            // band-passed sample (zero-centered)
+
+  // ---- adaptive threshold: mean + K*stddev of filtered signal, with a hard floor ----
+  const arate = pedWarmup<100 ? 0.1 : 0.02; pedWarmup++;   // adapt fast for first ~2s, then settle
+  magMean=magMean*(1-arate)+f*arate;
+  magVar=magVar*(1-arate)+((f-magMean)**2)*arate;
+  const thr=Math.max(CONFIG.MIN_PEAK, magMean+CONFIG.PEAK_K*Math.sqrt(magVar));
+
+  // ---- peak detection: rising then falling through threshold = step ----
+  if(f>lastMag){ rising=true; }
+  else if(f<lastMag && rising){
+    rising=false;                            // just passed a local peak
+    if(lastMag>thr && now-lastStepT>=CONFIG.MIN_STEP_MS){
+      lastStepT=now; stepTimes.push(now);
+      const c2=now-CONFIG.CADENCE_WINDOW_MS;
+      while(stepTimes.length&&stepTimes[0]<c2) stepTimes.shift();
+    }
+  }
+  lastMag=f;
 }
 function frameIsStill(){
-  const cut=performance.now()-CONFIG.ACCEL_WINDOW_MS;
-  const w=accelSamples.filter(s=>s.t>=cut);
+  const w=accelSamples;                     // already trimmed to the window in onMotion
   if(w.length<4) return false;
   const m=w.reduce((s,x)=>s+x.mag,0)/w.length;
   const v=w.reduce((s,x)=>s+(x.mag-m)**2,0)/w.length;
   return v<CONFIG.STILL_VARIANCE;
 }
-function detectStep(now,mag){
-  dynMean=dynMean*0.95+mag*0.05;
-  if(mag>dynMean+1.4 && (now-lastPeak)>250){ lastPeak=now; stepTimes.push(now); }
-  const cut=now-CONFIG.CADENCE_WINDOW_MS;
-  while(stepTimes.length && stepTimes[0]<cut) stepTimes.shift();
+// "moving" for cadence modes = a step happened very recently. This is FAR more
+// stable than the cadence number (which is jumpy) and prevents music cutouts.
+function stepRecently(){
+  return stepTimes.length>0 && (performance.now()-stepTimes[stepTimes.length-1])<CONFIG.STEP_RECENT_MS;
 }
 function currentCadence(){
+  const now=performance.now();
+  const cut=now-CONFIG.CADENCE_WINDOW_MS;
+  while(stepTimes.length && stepTimes[0]<cut) stepTimes.shift();
   if(stepTimes.length<2) return 0;
   const span=(stepTimes[stepTimes.length-1]-stepTimes[0])/1000;
   if(span<=0) return 0;
-  if(performance.now()-stepTimes[stepTimes.length-1]>1500) return 0;
+  if(now-stepTimes[stepTimes.length-1]>CONFIG.MAX_STEP_MS) return 0;
   return ((stepTimes.length-1)/span)*60;
 }
 
 /* ============================================================================
-   Paint
+   Tempo bars: one bar per sample of playback rate, newest at the right.
+   Bar height = rate (0..1×). Bars at 1× are full lime; below 1× they dim with
+   the rate; when the music is stopped they're the same dark as unlit gauge ticks.
    ============================================================================ */
-function paintMetric(){
-  const m=document.getElementById('metric'), u=document.getElementById('unit');
-  if(mode==='cycle'){ m.textContent=gpsSpeedMph.toFixed(1); u.textContent='MPH'; }
-  else{ m.textContent=Math.round(cadenceSpm); u.textContent='STEPS / MIN'; }
-  const g=goalPace();
-  document.getElementById('goalLine').innerHTML = mode==='cycle'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
+const strip={W:400,H:72,TOP:6,BOT:70,buf:[],head:0,n:0,lastPushT:0,bars:[]};
+strip.WINDOW=CONFIG.STRIP_WINDOW_S*CONFIG.STRIP_HZ;
+strip.buf=new Array(strip.WINDOW).fill(null);
+{
+  const g=$('tempoBars'), xs=strip.W/strip.WINDOW;
+  for(let i=0;i<strip.WINDOW;i++){
+    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    const x=(xs*(i+0.5)).toFixed(2);
+    l.setAttribute('class','t-bar'); l.setAttribute('x1',x); l.setAttribute('x2',x); l.setAttribute('y1',strip.BOT); l.setAttribute('y2',strip.BOT);
+    g.appendChild(l); strip.bars.push(l);
+  }
+  $('tempoWin').textContent=CONFIG.STRIP_WINDOW_S;
 }
-function paintRate(){
-  const on = curRate>=CONFIG.MIN_RATE && !audio.paused;
-  const shown = on ? curRate : 0;
-  paintGauge(shown/CONFIG.MAX_RATE, on);
-  document.getElementById('rateNum').textContent=shown.toFixed(2);
-  tempoPush(shown, performance.now());
+function stripReset(){ strip.n=0; strip.head=0; strip.lastPushT=0; }
+function stripAt(i){ return strip.buf[(strip.head-strip.n+i+strip.WINDOW)%strip.WINDOW]; }
+function stripPush(metric,rate,now){
+  if(now-strip.lastPushT<1000/CONFIG.STRIP_HZ) return;
+  strip.lastPushT=now;
+  strip.buf[strip.head]=rate; strip.head=(strip.head+1)%strip.WINDOW; strip.n=Math.min(strip.n+1,strip.WINDOW);
+  stripDraw();
+}
+function stripDraw(){
+  const {WINDOW,n,TOP,BOT,bars}=strip, span=BOT-TOP;
+  for(let k=0;k<WINDOW;k++){
+    const i=k-(WINDOW-n);                        // bar k shows sample i (right-aligned); empty on the left until the window fills
+    const b=bars[k];
+    if(i<0){ b.setAttribute('y1',BOT); b.classList.remove('on'); b.style.opacity='0'; continue; }
+    const r=Math.max(0,Math.min(1,stripAt(i)/CONFIG.MAX_RATE));
+    b.setAttribute('y1',(BOT-Math.max(3,span*r)).toFixed(1));
+    b.classList.toggle('on', r>0);
+    b.style.opacity = r>0 ? (0.35+0.65*r).toFixed(2) : '1';
+  }
 }
 
-/* ---- gauge: built once, driven by paintGauge() ---- */
+/* ============================================================================
+   Gauge (270° sweep, from 7:30 to 4:30 on the clock)
+   ============================================================================ */
 const gauge={R:150,TICK_R:168,N:54,START:-135,SWEEP:270,ticks:[]};
 {
-  const $=id=>document.getElementById(id), c=180, r=gauge.R;
+  const c=180, r=gauge.R;
   const pt=a=>{ const t=(a-90)*Math.PI/180; return [c+r*Math.cos(t), c+r*Math.sin(t)]; };
   const [x0,y0]=pt(gauge.START), [x1,y1]=pt(gauge.START+gauge.SWEEP);
   const d=`M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 1 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
@@ -405,10 +752,9 @@ const gauge={R:150,TICK_R:168,N:54,START:-135,SWEEP:270,ticks:[]};
   }
 }
 function paintGauge(frac, on){
-  const $=id=>document.getElementById(id);
   const pct=Math.max(0,Math.min(1,frac))*100;
   $('gFill').style.strokeDasharray=`${pct} 100`;
-  $('gFill').style.opacity=pct>0?'1':'0';                 // round caps draw a dot even at zero length
+  $('gFill').style.opacity=pct>0?'1':'0';   // round caps draw a dot even at zero length
   $('gFill').classList.toggle('paused',!on);
   $('gFillGlow').style.strokeDasharray=on?`${pct} 100`:'0 100';
   $('needle').setAttribute('transform',`translate(180 180) rotate(${gauge.START+gauge.SWEEP*pct/100})`);
@@ -417,84 +763,194 @@ function paintGauge(frac, on){
   $('glow').style.opacity=on?(0.25+0.75*pct/100).toFixed(2):'0';
 }
 
-/* ---- tempo bars: 4 samples/s of playback rate, 30 s window, newest at right ---- */
-const tempo={W:400,TOP:6,BOT:70,HZ:4,WINDOW:120,buf:[],head:0,n:0,lastT:0,bars:[]};
-tempo.buf=new Array(tempo.WINDOW).fill(0);
-{
-  const g=document.getElementById('tempoBars'), xs=tempo.W/tempo.WINDOW;
-  for(let i=0;i<tempo.WINDOW;i++){
-    const l=document.createElementNS('http://www.w3.org/2000/svg','line');
-    const x=(xs*(i+0.5)).toFixed(2);
-    l.setAttribute('class','t-bar'); l.setAttribute('x1',x); l.setAttribute('x2',x); l.setAttribute('y1',tempo.BOT); l.setAttribute('y2',tempo.BOT);
-    l.style.opacity='0';
-    g.appendChild(l); tempo.bars.push(l);
+/* ============================================================================
+   Paint
+   ============================================================================ */
+let paintedGoal='';
+function sensorProblem(){
+  const now=performance.now();
+  if(now-sessionStartT<CONFIG.SENSOR_WARN_MS) return '';
+  if(kind()==='gps'){
+    if(gpsErr==='denied') return 'Location blocked — allow it in settings';
+    if(!gpsLastT) return 'Waiting for GPS…';
+  } else {
+    if(motionPerm==='denied') return 'Motion blocked — allow it in settings';
+    if(!motionLastT) return 'No motion data — is the sensor allowed?';
   }
+  return '';
 }
-function tempoReset(){ tempo.n=0; tempo.head=0; tempo.lastT=0; tempo.bars.forEach(b=>{ b.setAttribute('y1',tempo.BOT); b.classList.remove('on'); b.style.opacity='0'; }); }
-function tempoPush(rate, now){
-  if(now-tempo.lastT<1000/tempo.HZ) return;
-  tempo.lastT=now;
-  tempo.buf[tempo.head]=rate; tempo.head=(tempo.head+1)%tempo.WINDOW; tempo.n=Math.min(tempo.n+1,tempo.WINDOW);
-  const {WINDOW,n,TOP,BOT,bars}=tempo, span=BOT-TOP;
-  for(let k=0;k<WINDOW;k++){
-    const i=k-(WINDOW-n), b=bars[k];
-    if(i<0){ b.style.opacity='0'; continue; }
-    const r=Math.max(0,Math.min(1,tempo.buf[(tempo.head-n+i+WINDOW)%WINDOW]/CONFIG.MAX_RATE));
-    b.setAttribute('y1',(BOT-Math.max(3,span*r)).toFixed(1));
-    b.classList.toggle('on', r>0);
-    b.style.opacity = r>0 ? (0.35+0.65*r).toFixed(2) : '1';
-  }
+function paint(still){
+  el.metric.textContent = kind()==='gps' ? gpsSpeedMph.toFixed(1) : String(Math.round(cadenceSpm));
+  el.unit.textContent=CONFIG.UNIT[mode];
+  const g=goalPace();
+  const goalTxt = kind()==='gps'?`1× at <b>${g} mph</b>`:`1× at <b>${g} spm</b>`;
+  if(goalTxt!==paintedGoal){ el.goalLine.innerHTML=goalTxt; paintedGoal=goalTxt; }
+
+  const shown=!playing?0:liveRate;
+  paintGauge(shown/CONFIG.MAX_RATE, playing);
+  el.rateNum.textContent=shown.toFixed(2);
+
+  const s=el.stateLabel;
+  const sounding=playing;
+  const problem=sounding?'':sensorProblem();
+  s.classList.toggle('playing',sounding);
+  s.classList.toggle('armed',armed&&!sounding&&!problem);
+  s.classList.toggle('warn',!!problem);
+  s.textContent = sounding ? (liveRate>=CONFIG.MAX_RATE?'On pace — 1×':'Faster for 1×') : (problem || (armed?'Move to begin':''));
+
 }
-function paintState(){
-  const s=document.getElementById('stateLabel');
-  const sounding = curRate>=CONFIG.MIN_RATE && !audio.paused;
-  s.classList.toggle('playing', sounding);
-  s.classList.toggle('armed', armed && !sounding);
-  if(sounding){ s.textContent = curRate>=CONFIG.MAX_RATE ? 'On pace — 1×' : 'Faster for 1×'; }
-  else if(armed){ s.textContent='Move to begin'; }
-  else s.textContent='';
-  paintRate();
+function diagLine(still){
+  const g=goalPace();
+  return `${mode} · ${pace}\nmph ${gpsSpeedMph.toFixed(1)}${gpsErr?' ('+gpsErr+')':''}\nspm ${Math.round(cadenceSpm)}\nrate ${liveRate.toFixed(2)}>${curRate.toFixed(2)}\ngoal ${g}\nstill ${still}\nsnd ${wantSound?'want':'off'} ${playing?'PLAYING':'stopped'}\naud ${lastAudioErr}\ntrk ${trackIdx+1}/${playlist.length}`;
 }
 
 /* ============================================================================
    Wake Lock
    ============================================================================ */
-let wakeLock=null;
-async function keepAwake(){ try{ if('wakeLock' in navigator){ wakeLock=await navigator.wakeLock.request('screen'); } }catch(_){} }
-document.addEventListener('visibilitychange',()=>{ if(wakeLock!==null && document.visibilityState==='visible') keepAwake(); });
+let wakeLock=null, wantWake=false;
+async function keepAwake(){
+  wantWake=true;
+  try{ if('wakeLock' in navigator) wakeLock=await navigator.wakeLock.request('screen'); }
+  catch(e){ LOG('wakeLock: '+e.message); }
+}
+function releaseWake(){
+  wantWake=false;
+  if(wakeLock){ try{ wakeLock.release(); }catch(_){} wakeLock=null; }
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible') return;
+  if(wantWake) keepAwake();                  // the OS drops the lock when the tab hides; re-acquire
+  if(running && wantSound) resumeCtx();      // iOS parks the context as 'interrupted' after a call/lock
+});
+
+/* ============================================================================
+   Portrait lock
+   ============================================================================ */
+async function lockPortrait(){
+  try{ if(screen.orientation&&screen.orientation.lock) await screen.orientation.lock('portrait'); }catch(_){}
+}
+
+/* ============================================================================
+   Hold-to-act helper (pointer events: one path for touch + mouse)
+   ============================================================================ */
+function makeHold(node, ms, onComplete){
+  let t0=0, raf=0, active=false, pid=null;
+  const fill=node.querySelector('.fill');
+  function frame(){
+    if(!active) return;
+    const p=Math.min(1,(performance.now()-t0)/ms);
+    if(fill) fill.style.width=(p*100)+'%';
+    if(p>=1){ cancel(); onComplete(); return; }
+    raf=requestAnimationFrame(frame);
+  }
+  function start(ev){
+    if(active) return;
+    ev.preventDefault();
+    active=true; pid=ev.pointerId; t0=performance.now();
+    try{ node.setPointerCapture(pid); }catch(_){}
+    node.classList.add('armedhold');
+    raf=requestAnimationFrame(frame);
+  }
+  function cancel(){
+    active=false; cancelAnimationFrame(raf);
+    if(fill) fill.style.width='0%';
+    node.classList.remove('armedhold');
+    if(pid!==null){ try{ node.releasePointerCapture(pid); }catch(_){} pid=null; }
+  }
+  function onMove(ev){
+    if(!active||ev.pointerId!==pid) return;
+    const r=node.getBoundingClientRect();
+    if(ev.clientX<r.left||ev.clientX>r.right||ev.clientY<r.top||ev.clientY>r.bottom) cancel();
+  }
+  node.addEventListener('pointerdown',start);
+  node.addEventListener('pointermove',onMove);
+  node.addEventListener('pointerup',cancel);
+  node.addEventListener('pointercancel',cancel);
+  node.addEventListener('lostpointercapture',cancel);
+  node.addEventListener('contextmenu',ev=>ev.preventDefault());   // long-press menu would break the hold
+}
 
 /* ============================================================================
    Wiring
    ============================================================================ */
-function setMode(m){ mode=m; document.getElementById('modeCycle').setAttribute('aria-pressed',m==='cycle'); document.getElementById('modeJog').setAttribute('aria-pressed',m==='jog'); }
-function setPace(p){ pace=p; ['Crawl','Cruise','Suffer'].forEach(x=>document.getElementById('pace'+x).setAttribute('aria-pressed', p===x.toLowerCase())); }
-document.getElementById('modeCycle').onclick=()=>setMode('cycle');
-document.getElementById('modeJog').onclick=()=>setMode('jog');
-document.getElementById('paceCrawl').onclick=()=>setPace('crawl');
-document.getElementById('paceCruise').onclick=()=>setPace('cruise');
-document.getElementById('paceSuffer').onclick=()=>setPace('suffer');
+function setMode(m){ mode=m; ['Walk','Jog','Cycle'].forEach(x=>$('mode'+x).setAttribute('aria-pressed', String(m===x.toLowerCase()))); }
+function setPace(p){ pace=p; ['Crawl','Cruise','Suffer'].forEach(x=>$('pace'+x).setAttribute('aria-pressed', String(p===x.toLowerCase()))); }
+$('modeWalk').onclick=()=>setMode('walk');
+$('modeJog').onclick=()=>setMode('jog');
+$('modeCycle').onclick=()=>setMode('cycle');
+$('paceCrawl').onclick=()=>setPace('crawl');
+$('paceCruise').onclick=()=>setPace('cruise');
+$('paceSuffer').onclick=()=>setPace('suffer');
 
-document.getElementById('startBtn').onclick=async ()=>{
-  try{ if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){ await DeviceMotionEvent.requestPermission(); } }catch(_){}
-  window.addEventListener('devicemotion', onMotion);
-  startGPS(); keepAwake();
+el.startBtn.onclick=async ()=>{
+  if(!playlist.length){ loadPlaylist(); return; }   // button doubles as Retry
+  if(!firstReady){ prefetchAll(); return; }
+  LOG('START tapped');
 
-  // Prime audio inside the user gesture: load first track, play muted-ish then pause.
-  loadTrack(0, false);
-  audio.play().then(()=>{ audio.pause(); }).catch(()=>{});
+  // Everything that needs the user gesture happens BEFORE any await: the motion
+  // permission dialog can outlast iOS's transient activation window, and an
+  // AudioContext created after it comes up permanently suspended.
+  initAudioCtx();
+  resumeCtx();
+  try{ const b=actx.createBuffer(1,1,actx.sampleRate); const sn=actx.createBufferSource(); sn.buffer=b; sn.connect(actx.destination); sn.start(0); }catch(_){}
+  keepAwake(); lockPortrait();
 
-  armed=true; tempoReset();
-  document.getElementById('gate').style.display='none';
-  document.getElementById('app').style.visibility='visible';
+  try{
+    if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){
+      motionPerm=await DeviceMotionEvent.requestPermission();
+      LOG('motion permission: '+motionPerm);
+    } else motionPerm='n/a';
+  }catch(e){ motionPerm='denied'; LOG('motion permission error: '+e.message); }
+
+  // clean session state
+  resetPedometer();
+  smoothBuf=[]; liveRate=0; curRate=0; moveSince=null; stopSince=null; pausedAt=0;
+  gpsSpeedMph=0; gpsLastT=0; cadenceSpm=0; lastAudioErr='';
+  sessionStartT=performance.now(); lastTickT=0;
+  stripReset(); stripDraw();
+
+  window.addEventListener('devicemotion',onMotion);
+  startGPS();
+  loadTrack(0,false);   // song 1 is already decoded: this only sets the current track
+
+  armed=true;
+  el.gate.classList.add('hidden');
+  el.app.classList.add('visible');
+  running=true;
   scheduleTick();
 };
 
-document.getElementById('nextBtn').onclick=()=>loadTrack(trackIdx+1, wantSound);
-document.getElementById('prevBtn').onclick=()=>loadTrack(trackIdx-1, wantSound);
-document.getElementById('endBtn').onclick=()=>{
-  armed=false; wantSound=false; try{audio.pause();}catch(_){}
-  document.getElementById('app').style.visibility='hidden';
-  document.getElementById('gate').style.display='flex';
+// hold-to-skip + hold-to-end
+makeHold($('nextBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx+1,wantSound));
+makeHold($('prevBtn'), CONFIG.HOLD_MS, ()=>loadTrack(trackIdx-1,wantSound));
+makeHold($('endBtn'), CONFIG.HOLD_MS, ()=>{
+  armed=false; running=false; wantSound=false;
+  stopSource();
+  window.removeEventListener('devicemotion',onMotion);
+  stopGPS();
+  releaseWake();
+  try{ if(screen.orientation&&screen.orientation.unlock) screen.orientation.unlock(); }catch(_){}
+  if(actx && actx.state==='running'){ actx.suspend().catch(()=>{}); }
+  el.app.classList.remove('visible');
+  el.gate.classList.remove('hidden');
+  LOG('session ended, sensors released');
+});
+
+// log panel controls
+$('logToggle').onclick=()=>el.logPanel.classList.toggle('open');
+$('logClose').onclick=()=>el.logPanel.classList.remove('open');
+$('logClear').onclick=()=>{ logLines=[]; el.logText.textContent=''; };
+el.logCopy.onclick=async ()=>{
+  const txt='Cadence log · '+logLines.length+' lines · '+new Date().toISOString()+'\n'+logLines.join('\n');
+  const flash=t=>{ el.logCopy.textContent=t; setTimeout(()=>el.logCopy.textContent='Copy',1200); };
+  try{ await navigator.clipboard.writeText(txt); flash('Copied!'); }
+  catch(e){
+    // fallback: select into a temporary textarea
+    const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); flash('Copied!'); }catch(_){ flash('Copy failed'); }
+    ta.remove();
+  }
 };
 
 loadPlaylist();
